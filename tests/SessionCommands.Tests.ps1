@@ -340,3 +340,113 @@ Describe 'Restart-GreenroomSession' {
         Should -Invoke -ModuleName Greenroom Test-SelfIsInstance -Times 1 -Exactly
     }
 }
+
+Describe 'Stop-GreenroomSession' {
+
+    BeforeEach {
+        Mock -ModuleName Greenroom Get-ScheduledTask { [PSCustomObject]@{ TaskName = 'greenroom-probe' } }
+        Mock -ModuleName Greenroom Test-SelfIsInstance { $false }
+        Mock -ModuleName Greenroom Assert-CanActOnInstance { $true }
+        Mock -ModuleName Greenroom Stop-VerifiedProcess { 1 }
+        Mock -ModuleName Greenroom Stop-ScheduledTask { }
+        Mock -ModuleName Greenroom Start-ScheduledTask { }
+        Mock -ModuleName Greenroom Start-Sleep { }
+        Mock -ModuleName Greenroom Test-InstanceElevated { $false }
+        Mock -ModuleName Greenroom Test-SelfElevated { $false }
+        # Absent means stopped. The settle loop asks repeatedly, so this is the
+        # "it stayed down" case.
+        Mock -ModuleName Greenroom Get-GreenroomInstance { @() }
+    }
+
+    It 'stops the watchdog, the session and the launcher' {
+        Stop-GreenroomSession -Name probe | Out-Null
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 3 -Exactly
+    }
+
+    It 'stops the watchdog FIRST, or it resurrects the session mid-run' {
+        Stop-GreenroomSession -Name probe | Out-Null
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 1 -Exactly `
+            -ParameterFilter { $Label -eq 'watchdog' }
+    }
+
+    It 'does NOT start the task again -- that is the whole difference from Restart' {
+        Stop-GreenroomSession -Name probe | Out-Null
+        Should -Invoke -ModuleName Greenroom Start-ScheduledTask -Times 0
+    }
+
+    It 'stops the task so its trigger cannot start a replacement watchdog mid-run' {
+        Stop-GreenroomSession -Name probe | Out-Null
+        Should -Invoke -ModuleName Greenroom Stop-ScheduledTask -Times 1 -Exactly
+    }
+
+    It 'reports what it stopped as data' {
+        $r = Stop-GreenroomSession -Name probe
+        $r.Instance        | Should -Be 'probe'
+        $r.WatchdogStopped | Should -Be 1
+        $r.SessionStopped  | Should -Be 1
+        $r.LauncherStopped | Should -Be 1
+        $r.StayedDown      | Should -BeTrue
+    }
+
+    It 'reports StayedDown false when something puts the session back' {
+        # The failure this check exists for: a watchdog whose command line did not match
+        # the pattern -- one from a different asset version, say -- survives, restarts the
+        # session, and the three kill counts still look like success.
+        Mock -ModuleName Greenroom Get-GreenroomInstance {
+            [PSCustomObject]@{ PSTypeName = 'Greenroom.Instance'; Instance = 'probe'; ClaudePid = 99; Opaque = $false }
+        }
+        $r = Stop-GreenroomSession -Name probe -WarningAction SilentlyContinue
+        $r.StayedDown | Should -BeFalse
+    }
+
+    It 'skips the settle check with -SettleSeconds 0' {
+        Mock -ModuleName Greenroom Get-GreenroomInstance {
+            [PSCustomObject]@{ PSTypeName = 'Greenroom.Instance'; Instance = 'probe'; Opaque = $false }
+        }
+        $r = Stop-GreenroomSession -Name probe -SettleSeconds 0
+        $r.StayedDown | Should -BeTrue -Because 'nothing was observed, so nothing contradicts it'
+        Should -Invoke -ModuleName Greenroom Get-GreenroomInstance -Times 0
+    }
+
+    It 'cannot confirm an elevated instance from an unelevated shell' {
+        # Absence is not evidence when the command line is unreadable across integrity
+        # levels. Reporting Confirmed here would be reporting a check that never ran.
+        Mock -ModuleName Greenroom Test-InstanceElevated { $true }
+        Mock -ModuleName Greenroom Test-SelfElevated { $false }
+        $r = Stop-GreenroomSession -Name probe -WarningAction SilentlyContinue
+        $r.Confirmed | Should -BeFalse
+    }
+
+    It 'REFUSES to stop the session the shell is running inside' {
+        Mock -ModuleName Greenroom Test-SelfIsInstance { $true }
+        { Stop-GreenroomSession -Name probe -ErrorAction Stop } | Should -Throw
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 0
+    }
+
+    It 'refuses when the instance has no scheduled task' {
+        Mock -ModuleName Greenroom Get-ScheduledTask { $null }
+        { Stop-GreenroomSession -Name nope -ErrorAction Stop } | Should -Throw
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 0
+    }
+
+    It 'kills nothing under -WhatIf' {
+        Stop-GreenroomSession -Name probe -WhatIf
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 0
+        Should -Invoke -ModuleName Greenroom Stop-ScheduledTask -Times 0
+    }
+
+    It 'matches a session whose name ends in a dash' {
+        # ValidatePattern allows 'render-', and a \b word boundary does not match after a
+        # non-word character -- the bug that made the kill patterns match nothing.
+        Stop-GreenroomSession -Name 'render-' | Out-Null
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 1 -Exactly -ParameterFilter {
+            $Label -eq 'session' -and
+            ('claude.exe --remote-control render- --add-dir C:\x' -match $Pattern)
+        }
+    }
+
+    It 'accepts a Greenroom.Instance from the pipeline via the Instance alias' {
+        [PSCustomObject]@{ PSTypeName = 'Greenroom.Instance'; Instance = 'probe' } | Stop-GreenroomSession | Out-Null
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 3 -Exactly
+    }
+}

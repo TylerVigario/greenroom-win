@@ -69,10 +69,11 @@ FormatsToProcess = 'Greenroom.format.ps1xml'
 # NestedModules = @()
 
 # Functions to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no functions to export.
-FunctionsToExport = 'Get-GreenroomInstance', 'Show-GreenroomSession', 
-               'Hide-GreenroomSession', 'Restart-GreenroomSession', 
-               'Switch-GreenroomSession', 'Uninstall-GreenroomInstance', 
-               'Install-GreenroomInstance', 'Update-GreenroomInstance'
+FunctionsToExport = 'Get-GreenroomInstance', 'Show-GreenroomSession',
+               'Hide-GreenroomSession', 'Restart-GreenroomSession',
+               'Stop-GreenroomSession', 'Switch-GreenroomSession',
+               'Uninstall-GreenroomInstance', 'Install-GreenroomInstance',
+               'Update-GreenroomInstance'
 
 # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
 CmdletsToExport = @()

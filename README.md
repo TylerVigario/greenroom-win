@@ -82,12 +82,13 @@ Show-GreenroomSession    desktop-admin            # reveal it
 Hide-GreenroomSession    desktop-admin            # put it away, session keeps running
 Switch-GreenroomSession  desktop-admin            # whichever it is not
 Restart-GreenroomSession desktop-admin
+Stop-GreenroomSession    desktop-admin            # down, and stays down until you say
 Update-GreenroomInstance                          # after a module upgrade
 Uninstall-GreenroomInstance -Name desktop-admin
 ```
 
 The name can be omitted **when exactly one instance is installed** — for the visibility
-commands and `Restart-`. The other two differ, deliberately: `Update-GreenroomInstance`
+commands, `Restart-` and `Stop-`. The other two differ, deliberately: `Update-GreenroomInstance`
 with no name updates **every** instance whose assets are behind, and `Uninstall-` always
 requires `-Name`, because removing the wrong instance is not a mistake worth making
 convenient.
@@ -107,8 +108,18 @@ Get-GreenroomInstance | Where-Object { $null -eq $_.Window } | Restart-Greenroom
 `Show-`, `Hide-` and `Switch-` return **nothing** — they are `System.Void`, so a pipeline
 ends at them. `Restart-` returns the instance it brought back up, and so does `Install-`
 — except under `-NoStart`, where there is no session to hand back and it returns an
-install result instead. `Uninstall-` returns a result object. When you want state after a
-visibility change, ask for it: `Show-GreenroomSession x; Get-GreenroomInstance x`.
+install result instead. `Uninstall-` and `Stop-` return result objects. When you want
+state after a visibility change, ask for it: `Show-GreenroomSession x; Get-GreenroomInstance x`.
+
+`Stop-` is the one that had no answer before: `Hide-` only moves the window and the
+process keeps its handles, `Restart-` brings it straight back, and `Uninstall-` removes
+the instance. It stops the watchdog, the session and the launcher, then watches for a few
+seconds to confirm nothing put the session back — a supervisor that was missed would
+otherwise leave three successful-looking kill counts and a running session. The scheduled
+task is stopped but **not disabled**, so the instance returns at the next logon.
+
+The case it exists for is upgrading the Claude Code CLI, which every session holds open —
+see [Troubleshooting](docs/troubleshooting.md#upgrading-the-claude-code-cli).
 
 Every state-changing command supports `-WhatIf` and `-Confirm`. `-Verbose` explains
 what a command decided and why, including the specific reason a window could not be

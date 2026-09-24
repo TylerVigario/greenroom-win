@@ -81,6 +81,40 @@ the duplicate from doing damage, but the tidy route is `Restart-GreenroomSession
 
 ---
 
+## Upgrading the Claude Code CLI
+
+A running session holds `claude.exe` open, so upgrading the CLI underneath it fails:
+
+```
+remove: Access is denied.: "…\WinGet\Packages\Anthropic.ClaudeCode_…\claude.exe"
+Installer failed with exit code: 0x8a150003
+```
+
+On a WinGet install there is only **one** file to lock. `~\AppData\Local\Microsoft\WinGet\Links\claude.exe`
+is a symlink into the package directory, and every session — greenroom's and any you
+started yourself — runs through it. Hiding a window does not release the handle, and
+restarting only re-takes it.
+
+Take the instances down, upgrade, bring them back:
+
+```powershell
+Get-GreenroomInstance | Stop-GreenroomSession
+winget upgrade --id Anthropic.ClaudeCode
+Get-GreenroomInstance | Restart-GreenroomSession
+```
+
+**Stopping the instances is not always enough.** An interactive Claude Code session holds
+the same binary, including the one you may be running these commands inside. MEASURED:
+with every greenroom instance stopped, the package file was still locked, and the only
+remaining holder was an interactive session started by hand. Exit those too, and run the
+upgrade from a plain terminal.
+
+Claude **Desktop** can stay open. Its `Claude.exe` processes are the Electron app under
+`Program Files\WindowsApps`, a different binary that does not touch this file — which is
+also why matching by process name is the wrong instrument here.
+
+---
+
 ## Never `Stop-Process -Name claude`
 
 A host with Claude Desktop installed has several distinct `claude.exe` binaries; matching
