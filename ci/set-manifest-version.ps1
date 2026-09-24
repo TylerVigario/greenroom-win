@@ -113,7 +113,7 @@ for ($i = 0; $i -lt $lines.Count; $i++) {
 }
 $notes = ($kept -join "`n").Trim()
 
-$notes = $notes + "`n`nFull changelog: https://github.com/Vigario-Technology-Solutions/greenroom-win/releases/tag/v$Version"
+$notes = $notes + "`n`nFull changelog: https://github.com/TylerVigario/greenroom-win/releases/tag/v$Version"
 
 Update-ModuleManifest -Path $ManifestPath -ModuleVersion $Version -ReleaseNotes $notes
 

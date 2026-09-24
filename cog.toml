@@ -92,7 +92,7 @@ path = "CHANGELOG.md"
 # it is updated, and each release regenerates links from whatever it says.
 template = "remote"
 remote = "github.com"
-owner = "Vigario-Technology-Solutions"
+owner = "TylerVigario"
 repository = "greenroom-win"
 
 # PREPENDING IS A HARD REQUIREMENT and cocogitto does it natively, by looking for a literal
