@@ -82,7 +82,7 @@ Show-GreenroomSession    desktop-admin            # reveal it
 Hide-GreenroomSession    desktop-admin            # put it away, session keeps running
 Switch-GreenroomSession  desktop-admin            # whichever it is not
 Restart-GreenroomSession desktop-admin
-Stop-GreenroomSession    desktop-admin            # down, and stays down until you say
+Stop-GreenroomSession    desktop-admin            # down until you start it, or the next logon
 Update-GreenroomInstance                          # after a module upgrade
 Uninstall-GreenroomInstance -Name desktop-admin
 ```
