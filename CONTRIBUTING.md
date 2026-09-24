@@ -19,7 +19,7 @@ gallery and no network. These are PSResourceGet cmdlets, so run them **under pws
 stock Windows PowerShell 5.1 has PowerShellGet only and does not have them.
 
 ```powershell
-git clone https://github.com/Vigario-Technology-Solutions/greenroom-win
+git clone https://github.com/TylerVigario/greenroom-win
 cd greenroom-win
 Get-ChildItem -Recurse | Unblock-File   # if it arrived as an archive
 Register-PSResourceRepository -Name greenroom-local -Uri (Resolve-Path .) -Trusted

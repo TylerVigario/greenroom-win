@@ -105,10 +105,10 @@ PrivateData = @{
         LicenseUri = 'https://www.gnu.org/licenses/agpl-3.0.en.html'
 
         # A URL to the main website for this project.
-        ProjectUri = 'https://github.com/Vigario-Technology-Solutions/greenroom-win'
+        ProjectUri = 'https://github.com/TylerVigario/greenroom-win'
 
         # A URL to an icon representing this module.
-        IconUri = 'https://raw.githubusercontent.com/Vigario-Technology-Solutions/greenroom-win/main/assets/greenroom.png'
+        IconUri = 'https://raw.githubusercontent.com/TylerVigario/greenroom-win/main/assets/greenroom.png'
 
         # ReleaseNotes of this module
         ReleaseNotes = '#### Features
