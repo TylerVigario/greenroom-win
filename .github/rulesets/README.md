@@ -1,13 +1,23 @@
 # Rulesets
 
-`main.json` is the branch protection payload, applied under the name
-**`main-protection`**. It is committed because a ruleset is applied state that
-lives only on GitHub: it vanishes silently on repository recreate, rename or fork,
-and nothing in a clone reveals it is gone.
+Two payloads, one per ruleset applied to this repository:
 
-**The file is the source of truth. Apply it; do not hand-configure.** This payload
+| File | Ruleset | Target |
+|---|---|---|
+| `main.json` | **`main-protection`** | branch — the default branch |
+| `tag.json` | **`tag-protection`** | tag — `~ALL` |
+
+They are committed because a ruleset is applied state that lives only on GitHub:
+it vanishes silently on repository recreate, rename or fork, and nothing in a
+clone reveals it is gone. `tag-protection` spent time enforced with no committed
+payload — active on the server, invisible here, and impossible to verify from a
+checkout, which is the same hole in the other direction.
+
+**The file is the source of truth. Apply it; do not hand-configure.** `main.json`
 spent several commits describing protection that had been set by hand and never
-matched it, which is the failure it exists to prevent.
+matched it, which is the failure these exist to prevent. For the same reason a
+payload records what is *applied*, not what would be better: change the file and
+apply it, in that order, or the two disagree again.
 
 ```bash
 # create
@@ -15,6 +25,9 @@ gh api repos/<org>/<repo>/rulesets --method POST --input .github/rulesets/main.j
 
 # update an existing one
 gh api repos/<org>/<repo>/rulesets/<id> --method PUT --input .github/rulesets/main.json
+
+# list what is applied, to check either file against reality
+gh api repos/<org>/<repo>/rulesets --jq '.[] | .id, .name, .target'
 ```
 
 Read back what is enforced from the **rules** endpoint. The legacy
@@ -67,3 +80,25 @@ environment — required reviewer, limited to `main` — rather than repository-
 
 To push by hand instead, set `enforcement` to `disabled` first — a deliberate,
 visible act rather than a standing exemption.
+
+## `tag.json`
+
+`deletion` + `non_fast_forward` on every tag, with **no bypass actors** — the
+release App is exempt from `main-protection` only. It does not need an exemption
+here, because neither rule blocks *creating* a tag, which is all a release does.
+
+**This is not quite immutability, and the gap is a convention rather than a rule.**
+Those two rules stop an *annotated* tag being re-pointed, because the new tag
+object is not a descendant of the old one. A *lightweight* tag moved to a
+descendant commit is a fast-forward, and is allowed. Immutability therefore rests
+on always creating annotated tags, which `cog bump --annotated` does — see the
+`post_bump_hooks` in `cog.toml`.
+
+Adding the `update` rule would remove that dependency on tag type. It is not here
+because it is not applied; adding it means changing this file **and** applying it,
+not one or the other.
+
+One version number naming two different sets of bits is the failure this prevents,
+and it matters most where something downstream builds from a tag — here, the
+PowerShell Gallery publish, which is one-way: a published version can be unlisted
+but never deleted.
