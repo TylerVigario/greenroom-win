@@ -82,13 +82,14 @@ Show-GreenroomSession    desktop-admin            # reveal it
 Hide-GreenroomSession    desktop-admin            # put it away, session keeps running
 Switch-GreenroomSession  desktop-admin            # whichever it is not
 Restart-GreenroomSession desktop-admin
+Start-GreenroomSession   desktop-admin            # bring a stopped one back; a running one is left alone
 Stop-GreenroomSession    desktop-admin            # down until you start it, or the next logon
 Update-GreenroomInstance                          # after a module upgrade
 Uninstall-GreenroomInstance -Name desktop-admin
 ```
 
 The name can be omitted **when exactly one instance is installed** — for the visibility
-commands, `Restart-` and `Stop-`. The other two differ, deliberately: `Update-GreenroomInstance`
+commands, `Restart-`, `Start-` and `Stop-`. `Start-` also takes wildcards: `Start-GreenroomSession *`. The other two differ, deliberately: `Update-GreenroomInstance`
 with no name updates **every** instance whose assets are behind, and `Uninstall-` always
 requires `-Name`, because removing the wrong instance is not a mistake worth making
 convenient.
@@ -106,7 +107,7 @@ Get-GreenroomInstance | Where-Object { $null -eq $_.Window } | Restart-Greenroom
 ```
 
 `Show-`, `Hide-` and `Switch-` return **nothing** — they are `System.Void`, so a pipeline
-ends at them. `Restart-` returns the instance it brought back up, and so does `Install-`
+ends at them. `Restart-` and `Start-` return the instance they brought up, and so does `Install-`
 — except under `-NoStart`, where there is no session to hand back and it returns an
 install result instead. `Uninstall-` and `Stop-` return result objects. When you want
 state after a visibility change, ask for it: `Show-GreenroomSession x; Get-GreenroomInstance x`.
@@ -116,7 +117,9 @@ process keeps its handles, `Restart-` brings it straight back, and `Uninstall-` 
 the instance. It stops the watchdog, the session and the launcher, then watches for a few
 seconds to confirm nothing put the session back — a supervisor that was missed would
 otherwise leave three successful-looking kill counts and a running session. The scheduled
-task is stopped but **not disabled**, so the instance returns at the next logon.
+task is stopped but **not disabled**, so the instance returns at the next logon, or when
+you run `Start-GreenroomSession`. `Start-` is the only one of these that never kills
+anything: an instance that is already running is returned as it is.
 
 The case it exists for is upgrading the Claude Code CLI, which every session holds open —
 see [Troubleshooting](docs/troubleshooting.md#upgrading-the-claude-code-cli).
