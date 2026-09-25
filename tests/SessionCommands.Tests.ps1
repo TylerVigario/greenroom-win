@@ -914,6 +914,11 @@ function Stop-GreenroomSession {
     BeforeEach { Remove-Item (Join-Path $script:Stub 'acted.txt') -ErrorAction Ignore }
 
     It 'acts on every name in one process, past a failing one, and exits 1' {
+        # The child writes the failing name's error to stderr, on purpose. Under Windows
+        # PowerShell 5.1 a native command's stderr becomes an ERROR RECORD even when
+        # redirected to $null, and ci/check.ps1 runs with ErrorActionPreference Stop, so
+        # that expected line ended the test. MEASURED: CI's 5.1 leg failed here; pwsh 7 did not.
+        $ErrorActionPreference = 'Continue'
         pwsh -NoLogo -NoProfile -Command $script:Inner 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 1
         @(Get-Content (Join-Path $script:Stub 'acted.txt')) | Should -Be @('one', 'two')
