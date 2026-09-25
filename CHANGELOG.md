@@ -9,6 +9,22 @@ it. 0.1.0 at the bottom is hand-written and reads "Initial release." because a f
 release has no changes to list — there is nothing it changed from.
 
 - - -
+## [v0.4.0](https://github.com/TylerVigario/greenroom-win/compare/cc989af7bbde5a0c96af2f108d0212f20b61f1b8..v0.4.0) - 2026-09-25
+#### Features
+- (**session**) stop an instance and leave it stopped (#45) - ([e1e0a9b](https://github.com/TylerVigario/greenroom-win/commit/e1e0a9b14f65087cfbe9a95284e29a80c291d9f3)) - Tyler Vigario, Claude Opus 5
+- (**session**) pin an instance's conversation by id (#43) - ([cc989af](https://github.com/TylerVigario/greenroom-win/commit/cc989af7bbde5a0c96af2f108d0212f20b61f1b8)) - Tyler Vigario, Claude Opus 5
+#### Bug Fixes
+- (**ci**) commit the tag ruleset payload (#48) - ([ae35c2b](https://github.com/TylerVigario/greenroom-win/commit/ae35c2b205162e40f05f59a15f7cecbf793db759)) - Tyler Vigario, Claude Opus 5
+- (**package**) no company owns this module (#51) - ([9c7fa88](https://github.com/TylerVigario/greenroom-win/commit/9c7fa8818c24e4b8a56afdf9b9e31bf3857500ac)) - Tyler Vigario, Claude Opus 5
+- (**release**) name the App that actually exists (#50) - ([923c196](https://github.com/TylerVigario/greenroom-win/commit/923c196991cea2bc50219d376527bc9465483934)) - Tyler Vigario, Claude Opus 5
+- (**release**) point the release machinery at the repository's new owner (#46) - ([2bc26b5](https://github.com/TylerVigario/greenroom-win/commit/2bc26b507a0fcc8016d007b954e890fb17804c2e)) - Tyler Vigario, Claude Opus 5
+#### Documentation
+- (**readme**) say when a stopped instance actually comes back (#47) - ([e5e3114](https://github.com/TylerVigario/greenroom-win/commit/e5e31141aef8d4b921ce94d98ba65af79c9d98d5)) - Tyler Vigario, Claude Opus 5
+#### Continuous Integration
+- watch the action pins with dependabot (#49) - ([ed9f26f](https://github.com/TylerVigario/greenroom-win/commit/ed9f26fa92bad66a13d889f9c7375868992dd0f7)) - Tyler Vigario, Claude Opus 5
+
+- - -
+
 ## [v0.3.0](https://github.com/Vigario-Technology-Solutions/greenroom-win/compare/450e75014633d73812b9bb7927868738d124f076..v0.3.0) - 2026-08-03
 #### Features
 - (**install**) pin the model an instance launches with (#36) - ([8adb1af](https://github.com/Vigario-Technology-Solutions/greenroom-win/commit/8adb1afb95ec9af2fa4676ee56a8fdba1130e5a9)) - Tyler Vigario, Claude Opus 4.8
