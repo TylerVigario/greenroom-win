@@ -143,6 +143,19 @@ it. `-WhatIf` reports which are behind without touching them, `-Name` narrows it
 `-NoRestart` re-registers without interrupting the running session — the new assets then
 start with the next one.
 
+It reports one row per instance, including the ones it left alone, so a run that changed
+nothing is distinguishable from one that moved everything:
+
+```
+Instance             Action       From       To          ClaudePid
+--------             ------       ----       --          ---------
+laptop-admin         Updated      0.4.0      0.5.0           17096
+render-a             Current      0.5.0      0.5.0
+```
+
+`Action` is `Updated`, `Registered` (re-registered under `-NoRestart`, still running the old
+code), `Current`, `Unversioned` (a path carrying no version, left alone) or `Failed`.
+
 By hand, per instance, it is:
 
 ```powershell
@@ -169,8 +182,8 @@ one:
 Nothing errors, and every version readout agrees with the version you meant to be running.
 This was found on a host where a restart appeared to complete an upgrade and did not.
 
-`Get-GreenroomInstance` reports the running version as `AssetVersion` and warns when it
-differs from the loaded module, so the condition is visible rather than silent:
+`Get-GreenroomInstance` shows the version each task runs in its `AssetVersion` column, and
+warns when it differs from the loaded module, so the condition is visible rather than silent:
 
 ```
 WARNING: module 0.2.0 is loaded but laptop-admin runs 0.1.0. A version bump does not reach
@@ -180,7 +193,9 @@ an instance until it is re-registered, because the task names the versioned asse
 `Restart-GreenroomSession` warns for the same reason **before** it stops anything, since a
 restart at that point brings the old version straight back up.
 
-To confirm an upgrade landed, check the task and the live processes rather than the module:
+`AssetVersion` is read from the **task**, so it confirms what the next start will run. To
+confirm what is running *now* — after a restart that may not have completed — read the live
+processes instead:
 
 ```powershell
 (Get-ScheduledTask greenroom-<name>).Actions.Arguments

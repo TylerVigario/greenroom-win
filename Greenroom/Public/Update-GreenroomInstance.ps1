@@ -41,7 +41,18 @@
   then the running session keeps the old ones, so the drift warning stays accurate.
 
 .OUTPUTS
-  Greenroom.Instance for each restarted instance. Nothing under -NoRestart.
+  Greenroom.UpdateResult, one per matching instance -- including those left alone, so
+  "nothing needed doing" is an answer rather than silence. Action is one of:
+
+    Updated      re-registered on this version and restarted; ClaudePid is the new session
+    Registered   re-registered, not restarted (-NoRestart); the running session is still
+                 the old code until it next starts
+    Current      already runs this version, untouched
+    Unversioned  runs from a path carrying no version, untouched (-Force re-registers)
+    Failed       re-registration failed and the instance stays on From; the error says why
+
+  From is the version the task ran before, To the version loaded here. Nothing is emitted
+  for an instance a -WhatIf or -Confirm declined.
 
 .EXAMPLE
   Update-GreenroomInstance
@@ -55,7 +66,7 @@
 #>
 function Update-GreenroomInstance {
     [CmdletBinding(SupportsShouldProcess)]
-    [OutputType('Greenroom.Instance')]
+    [OutputType('Greenroom.UpdateResult')]
     param(
         # Pipeline-bound like the other state-changing commands, with the Instance alias,
         # so `Get-GreenroomInstance | Where-Object AssetVersion | Update-GreenroomInstance`
@@ -83,41 +94,55 @@ function Update-GreenroomInstance {
         return
     }
 
-    $targets = @()
+    # One result per matching instance, INCLUDING the ones left alone. "Already current"
+    # used to be a verbose message, so a run that changed nothing and a run that moved
+    # everything looked the same at the prompt -- which is the question this command
+    # exists to answer.
+    #
+    # A scriptblock rather than a nested function: a New- verb without ShouldProcess is an
+    # analyzer failure, and building a result object changes nothing.
+    $to = $script:GreenroomModuleVersion
+    $result = {
+        param($Instance, $Action, $From, $ClaudePid)
+        [PSCustomObject]@{
+            PSTypeName = 'Greenroom.UpdateResult'
+            Instance   = $Instance
+            Action     = $Action
+            From       = $From
+            To         = $to
+            ClaudePid  = $ClaudePid
+        }
+    }
+
     foreach ($n in ($names | Sort-Object)) {
         $asset = Get-InstanceAssetVersion -Name $n
 
-        if ($Force) {
-            $targets += [PSCustomObject]@{ Instance = $n; From = $asset }
+        if (-not $Force) {
+            if (-not $asset) {
+                # Not an error and not behind: a module installed somewhere unversioned,
+                # where new files land in place and there is nothing to move.
+                Write-Verbose "$n runs assets from a path carrying no version -- nothing to move (-Force re-registers anyway)"
+                & $result $n 'Unversioned' $null $null
+                continue
+            }
+            if ($asset -eq $to) {
+                & $result $n 'Current' $asset $null
+                continue
+            }
         }
-        elseif (-not $asset) {
-            Write-Verbose "$n runs assets from a path carrying no version -- nothing to move (-Force re-registers anyway)"
-        }
-        elseif ($asset -ne $script:GreenroomModuleVersion) {
-            $targets += [PSCustomObject]@{ Instance = $n; From = $asset }
-        }
-        else {
-            Write-Verbose "$n already runs $asset"
-        }
-    }
 
-    if ($targets.Count -eq 0) {
-        Write-Verbose "every matching instance already runs $script:GreenroomModuleVersion"
-        return
-    }
-
-    foreach ($t in $targets) {
-        $from = if ($t.From) { $t.From } else { 'an unversioned path' }
+        $from = if ($asset) { $asset } else { 'an unversioned path' }
 
         # ONE ShouldProcess for the whole per-instance update, for the same reason
         # Restart-GreenroomSession gates its three kills with one: re-registering and
         # restarting are a single decision, and prompting twice for it is noise. The inner
-        # calls are told not to ask again.
-        if (-not $PSCmdlet.ShouldProcess($t.Instance, "re-register $from -> $script:GreenroomModuleVersion$(if ($NoRestart) { '' } else { ' and restart' })")) {
+        # calls are told not to ask again. A declined prompt emits no result -- -WhatIf
+        # has already said what would happen, and a row claiming an Action would not be true.
+        if (-not $PSCmdlet.ShouldProcess($n, "re-register $from -> $to$(if ($NoRestart) { '' } else { ' and restart' })")) {
             continue
         }
 
-        try { Install-GreenroomInstance -Name $t.Instance -NoStart -Confirm:$false | Out-Null }
+        try { Install-GreenroomInstance -Name $n -NoStart -Confirm:$false | Out-Null }
         catch {
             # -ErrorAction Continue ON THE Write-Error ITSELF, and it is load-bearing. The
             # module sets $ErrorActionPreference = 'Stop', which functions here inherit, so
@@ -126,16 +151,23 @@ function Update-GreenroomInstance {
             # opposite of the intent. Measured: without this, a throw on the first instance
             # stopped the second from being re-registered at all.
             Write-Error -ErrorAction Continue -Message (
-                "re-registering '$($t.Instance)' failed, it stays on $from -- $($_.Exception.Message)")
+                "re-registering '$n' failed, it stays on $from -- $($_.Exception.Message)")
+            & $result $n 'Failed' $asset $null
             continue
         }
 
         if ($NoRestart) {
-            Write-Verbose "$($t.Instance) re-registered; the new assets start with the next session"
+            # Registered, not Updated: the task now names the new assets, but the session
+            # running right now is still the old code until it next starts.
+            & $result $n 'Registered' $asset $null
             continue
         }
 
-        Restart-GreenroomSession -Name $t.Instance -Confirm:$false
+        # Restart's instance row is folded into this result rather than passed through:
+        # two object types in one pipeline render as one table with the wrong columns.
+        # Its warnings and errors still reach the operator on their own streams.
+        $up = @(Restart-GreenroomSession -Name $n -Confirm:$false)
+        & $result $n 'Updated' $asset ($up | Select-Object -First 1 -ExpandProperty ClaudePid -ErrorAction Ignore)
     }
 
     }

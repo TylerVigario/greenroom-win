@@ -90,4 +90,11 @@ Describe 'drift reporting' {
         Mock -ModuleName Greenroom Get-InstanceAssetVersion { [version]'0.0.1' }
         (Get-GreenroomInstance -WarningAction SilentlyContinue).AssetVersion | Should -Be ([version]'0.0.1')
     }
+
+    It 'shows AssetVersion in the default table, not only on the object' {
+        # Computed and left off the table, it was the answer to "did the update take" that
+        # nobody saw without Format-List.
+        $view = Get-FormatData -TypeName 'Greenroom.Instance'
+        $view.FormatViewDefinition[0].Control.Headers.Label | Should -Contain 'AssetVersion'
+    }
 }
