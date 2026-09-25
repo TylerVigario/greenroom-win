@@ -37,11 +37,19 @@ name: Release
 # an hour, and is auditable as itself.
 #
 # SETUP, done once by the repository owner and recorded here so it can be rebuilt:
-#   1. A GitHub App in the Vigario-Technology-Solutions org — `greenroom-win-release`.
+#   1. A GitHub App owned by @TylerVigario — `greenroom-release`, App ID 5068384.
 #      Repository permissions: Contents: Read and write, and nothing else; webhook off.
 #      Contents covers the commit, the tag AND publishing the Release; they are one
 #      permission, so nothing further is needed.
 #   2. Installed on greenroom-win only.
+#      AN INSTALLATION DOES NOT TRAVEL WITH A REPOSITORY TRANSFER. It belongs to the
+#      account that installed it, so moving the repository between owners leaves it
+#      behind. MEASURED on the move out of the Vigario-Technology-Solutions org: the
+#      credentials were still valid -- the App JWT was accepted -- and the mint failed
+#      anyway with `Integration not found`, a 404 from
+#      GET /repos/<owner>/<repo>/installation. Re-install on the new owner.
+#      If the App was REPLACED rather than moved, its App ID changed with it, so step 4
+#      and both environment secrets belong to whichever App the ruleset now names.
 #   3. A `release` environment on the repository — required reviewer, limited to the
 #      `main` branch — carrying RELEASE_APP_CLIENT_ID, RELEASE_APP_PRIVATE_KEY and
 #      PSGALLERY_API_KEY as ENVIRONMENT secrets, not repository secrets, per the
