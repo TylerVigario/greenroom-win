@@ -101,13 +101,57 @@ Describe 'Assert-CanActOnInstance' {
     BeforeEach {
         Mock -ModuleName Greenroom Test-InstanceElevated { $true }
         Mock -ModuleName Greenroom Test-SelfElevated { $false }
-        Mock -ModuleName Greenroom Invoke-ElevatedSelf { 0 }
+        Mock -ModuleName Greenroom Invoke-ElevatedSelf { [PSCustomObject]@{ ExitCode = 0; Records = @() } }
     }
 
     It 'escalates for a real run against an elevated instance' {
         $r = InModuleScope Greenroom { Assert-CanActOnInstance -Name probe -Command 'Show-GreenroomSession' }
         $r | Should -BeFalse -Because 'the elevated copy did the work, so the caller must not also act'
         Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 1 -Exactly
+    }
+
+    It 'returns only its bool, even when the elevated run sent objects back' {
+        # The caller tests this in an if. An object replayed here would be read as part of
+        # that answer, so objects are dropped on this path -- the commands that use it
+        # return nothing anyway -- while the warning still reaches the operator.
+        Mock -ModuleName Greenroom Invoke-ElevatedSelf {
+            [PSCustomObject]@{ ExitCode = 0; Records = @(
+                [PSCustomObject]@{ Instance = 'probe' }
+                [PSCustomObject]@{ GreenroomStream = 'Warning'; Message = 'said over there' }
+            ) }
+        }
+        $r = @(InModuleScope Greenroom {
+            Assert-CanActOnInstance -Name probe -Command 'Show-GreenroomSession' -WarningVariable w -WarningAction SilentlyContinue
+            $script:W = $w
+        })
+        $r.Count | Should -Be 1
+        $r[0]    | Should -BeFalse
+        InModuleScope Greenroom { "$script:W" } | Should -Match 'said over there'
+    }
+
+    It 'reports the error text the elevated run sent back, not just its exit code' {
+        Mock -ModuleName Greenroom Invoke-ElevatedSelf {
+            [PSCustomObject]@{ ExitCode = 1; Records = @(
+                [PSCustomObject]@{ GreenroomStream = 'Error'; Message = 'window is gone'; ErrorId = 'Gone,Show-GreenroomSession'; Category = 'ObjectNotFound' }
+            ) }
+        }
+        $e = $null
+        InModuleScope Greenroom {
+            Assert-CanActOnInstance -Name probe -Command 'Show-GreenroomSession' -ErrorAction SilentlyContinue -ErrorVariable ev | Out-Null
+            $script:E = $ev
+        }
+        $e = InModuleScope Greenroom { $script:E }
+        @($e).Count | Should -Be 1
+        "$($e[0])"  | Should -Match 'window is gone'
+    }
+
+    It 'says the run reported nothing when it failed without a word' {
+        Mock -ModuleName Greenroom Invoke-ElevatedSelf { [PSCustomObject]@{ ExitCode = 1; Records = @() } }
+        InModuleScope Greenroom {
+            Assert-CanActOnInstance -Name probe -Command 'Show-GreenroomSession' -ErrorAction SilentlyContinue -ErrorVariable ev | Out-Null
+            $script:E = $ev
+        }
+        "$(InModuleScope Greenroom { $script:E })" | Should -Match 'reported nothing back'
     }
 
     It 'does NOT escalate under -WhatIf' {
@@ -765,7 +809,7 @@ Describe 'One UAC prompt for many elevated instances' {
         Mock -ModuleName Greenroom Test-SelfIsInstance { $false }
         Mock -ModuleName Greenroom Test-InstanceElevated { $Name -in 'a', 'c' }
         Mock -ModuleName Greenroom Test-SelfElevated { $false }
-        Mock -ModuleName Greenroom Invoke-ElevatedSelf { 0 }
+        Mock -ModuleName Greenroom Invoke-ElevatedSelf { [PSCustomObject]@{ ExitCode = 0; Records = @() } }
         Mock -ModuleName Greenroom Stop-VerifiedProcess { 1 }
         Mock -ModuleName Greenroom Stop-ScheduledTask { }
         Mock -ModuleName Greenroom Start-ScheduledTask { }
@@ -840,13 +884,55 @@ Describe 'One UAC prompt for many elevated instances' {
     }
 
     It 'a failed elevated run is reported as the command, naming every instance it carried' {
-        # Only the exit code crosses back, so which one failed cannot be known here.
-        Mock -ModuleName Greenroom Invoke-ElevatedSelf { 1 }
+        # A run that dies before writing its results reports nothing back, so which one
+        # failed cannot be known here.
+        Mock -ModuleName Greenroom Invoke-ElevatedSelf { [PSCustomObject]@{ ExitCode = 1; Records = @() } }
         Mock -ModuleName Greenroom Get-GreenroomInstance { }
         Stop-GreenroomSession -Name '*' -SettleSeconds 0 -WarningAction SilentlyContinue -ErrorAction SilentlyContinue -ErrorVariable e | Out-Null
         $e.Count                    | Should -Be 1
         $e[0].FullyQualifiedErrorId | Should -Be 'ElevatedRunFailed,Stop-GreenroomSession'
         "$($e[0])"                  | Should -Match "'a', 'c'"
+    }
+
+    It 'replays what the elevated run said: its results typed, its warnings, its errors' {
+        # Results arrive deserialized, typed Deserialized.Greenroom.StopResult -- which no
+        # view matches, so they would print as a bare list. The type name is restored.
+        Mock -ModuleName Greenroom Get-GreenroomInstance { }
+        Mock -ModuleName Greenroom Invoke-ElevatedSelf {
+            $stopped = [PSCustomObject]@{ Instance = 'a'; StayedDown = $true }
+            $stopped.PSObject.TypeNames.Insert(0, 'Deserialized.Greenroom.StopResult')
+            [PSCustomObject]@{ ExitCode = 1; Records = @(
+                $stopped
+                [PSCustomObject]@{ GreenroomStream = 'Warning'; Message = 'settled late' }
+                [PSCustomObject]@{ GreenroomStream = 'Error'; Message = 'c would not stop'; ErrorId = 'Stuck,Stop-GreenroomSession'; Category = 'OperationStopped' }
+            ) }
+        }
+        $out = @(Stop-GreenroomSession -Name '*' -SettleSeconds 0 -WarningVariable w -WarningAction SilentlyContinue -ErrorAction Continue 2>&1)
+        $err = @($out | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] })
+        $obj = @($out | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] })
+
+        ($obj.Instance | Sort-Object) | Should -Be @('a', 'b')
+        ($obj | Where-Object Instance -eq 'a').PSObject.TypeNames[0] | Should -Be 'Greenroom.StopResult'
+        "$w" | Should -Match 'settled late'
+
+        # One error: the run's own. It explains the non-zero exit, so the generic
+        # "exited with code 1" must not be stacked on top of it.
+        $err.Count                    | Should -Be 1
+        "$($err[0])"                  | Should -Match 'c would not stop'
+        $err[0].FullyQualifiedErrorId | Should -Be 'Stuck,Stop-GreenroomSession'
+        $err[0].CategoryInfo.Category | Should -Be 'OperationStopped'
+    }
+
+    It 'restores only the module''s own types' {
+        $r = InModuleScope Greenroom {
+            $foreign = [PSCustomObject]@{ X = 1 }
+            $foreign.PSObject.TypeNames.Insert(0, 'Deserialized.Some.Other.Type')
+            & {
+                [CmdletBinding()] param()
+                Write-ForwardedRecord -Record @($foreign) -Cmdlet $PSCmdlet | Out-Null
+            }
+        }
+        $r.PSObject.TypeNames[0] | Should -Be 'Deserialized.Some.Other.Type'
     }
 
     It '-NoElevate refuses each elevated instance and escalates nothing' {
@@ -928,5 +1014,86 @@ function Stop-GreenroomSession {
         pwsh -NoLogo -NoProfile -Command $script:Inner.Replace("'bad',", '') | Out-Null
         $LASTEXITCODE | Should -Be 0
         @(Get-Content (Join-Path $script:Stub 'acted.txt')) | Should -Be @('one', 'two')
+    }
+}
+
+Describe 'What the elevated run said, round-tripped for real' {
+
+    # The command Invoke-ElevatedSelf builds, run in a real child pwsh -- the Start-Process
+    # mock executes it rather than recording it -- so the CLIXML file is really written by
+    # one process and read by another. A test that handed Records in directly would pass a
+    # command whose text did not parse, or a file that could not be read back.
+
+    BeforeAll {
+        $script:Stub = Join-Path $TestDrive 'Greenroom'
+        New-Item -ItemType Directory -Force $script:Stub | Out-Null
+        Set-Content -Path (Join-Path $script:Stub 'Greenroom.psm1') -Value @'
+function Stop-GreenroomSession {
+    [CmdletBinding(SupportsShouldProcess)]
+    param([Parameter(ValueFromPipeline)][string]$Name, [switch]$NoElevate)
+    process {
+        if ($Name -eq 'bad') { Write-Error -Message "failed for $Name" -Category ObjectNotFound; return }
+        Write-Warning "warned for $Name"
+        [PSCustomObject]@{ PSTypeName = 'Greenroom.StopResult'; Instance = $Name; AssetVersion = [version]'9.8.7' }
+    }
+}
+'@
+        New-ModuleManifest -Path (Join-Path $script:Stub 'Greenroom.psd1') -RootModule 'Greenroom.psm1' `
+            -FunctionsToExport 'Stop-GreenroomSession' -ModuleVersion '0.0.1'
+
+        function Invoke-RealRun([string]$Root, [string[]]$Names) {
+            Mock -ModuleName Greenroom Start-Process {
+                $script:RunInner = $ArgumentList[-1]
+                # Continue for the child's run: under 5.1 a native command's stderr becomes
+                # an error record even when redirected, and the gate runs with Stop.
+                $prev = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                try { pwsh -NoLogo -NoProfile -Command $ArgumentList[-1] 2>$null | Out-Null; $code = $LASTEXITCODE }
+                finally { $ErrorActionPreference = $prev }
+                [PSCustomObject]@{ ExitCode = $code }
+            }
+            InModuleScope Greenroom -Parameters @{ Root = $Root; Names = $Names } {
+                param($Root, $Names)
+                $saved = $script:GreenroomModuleRoot
+                $script:GreenroomModuleRoot = $Root
+                try { Invoke-ElevatedSelf -Command 'Stop-GreenroomSession' -Name $Names -WarningAction SilentlyContinue }
+                finally { $script:GreenroomModuleRoot = $saved }
+            }
+        }
+    }
+
+    It 'brings back every result, warning and error, in order, and exits 1 for the failure' {
+        $run = Invoke-RealRun $script:Stub 'one', 'bad', 'two'
+        $run.ExitCode | Should -Be 1
+
+        $results = @($run.Records | Where-Object { -not $_.PSObject.Properties['GreenroomStream'] })
+        $results.Instance                 | Should -Be @('one', 'two')
+        $results[0].PSObject.TypeNames[0] | Should -Be 'Deserialized.Greenroom.StopResult'
+        $results[0].AssetVersion          | Should -Be ([version]'9.8.7')
+
+        # Flattened in the child: a deserialized WarningRecord's Message and an
+        # ErrorRecord's category both come back empty, measured on 5.1 and 7.
+        @($run.Records | Where-Object GreenroomStream -eq 'Warning').Message | Should -Be @('warned for one', 'warned for two')
+        $err = @($run.Records | Where-Object GreenroomStream -eq 'Error')
+        $err.Count       | Should -Be 1
+        $err[0].Message  | Should -Be 'failed for bad'
+        $err[0].Category | Should -Be 'ObjectNotFound'
+    }
+
+    It 'leaves nothing behind in temp' {
+        Invoke-RealRun $script:Stub 'one' | Out-Null
+        $script:RunInner -match 'greenroom-elevated-[0-9a-f]{32}\.clixml' | Should -BeTrue
+        Join-Path ([IO.Path]::GetTempPath()) $Matches[0] | Should -Not -Exist
+    }
+
+    It 'brings back the reason when the child fails before running the command at all' {
+        # A module path that does not import: the child never reaches the command, but
+        # its catch still records why, rather than leaving only "exited with code 1".
+        $run = Invoke-RealRun (Join-Path $TestDrive 'nowhere') 'one'
+        $run.ExitCode | Should -Be 1
+        $err = @($run.Records | Where-Object GreenroomStream -eq 'Error')
+        $err.Count      | Should -Be 1
+        $err[0].ErrorId | Should -Be 'ElevatedRunCrashed'
+        $err[0].Message | Should -Not -BeNullOrEmpty
     }
 }

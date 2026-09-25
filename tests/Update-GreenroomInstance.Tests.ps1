@@ -28,9 +28,11 @@ Describe 'Update-GreenroomInstance' {
         }
         Mock -ModuleName Greenroom Install-GreenroomInstance { }
         Mock -ModuleName Greenroom Restart-GreenroomSession { }
-        # alpha is behind, beta is current.
+        # alpha is behind, beta is current. $script:Loaded, not $script:GreenroomModuleVersion:
+        # a mock body runs in THIS file's scope, where the module's variable is $null -- which
+        # made beta read as Unversioned, and the test passed for the wrong reason.
         Mock -ModuleName Greenroom Get-InstanceAssetVersion {
-            if ($Name -eq 'alpha') { [version]'0.0.1' } else { $script:GreenroomModuleVersion }
+            if ($Name -eq 'alpha') { [version]'0.0.1' } else { $script:Loaded }
         }
     }
 
@@ -122,5 +124,81 @@ Describe 'Update-GreenroomInstance' {
         Mock -ModuleName Greenroom Install-GreenroomInstance { throw 'nope' }
         Update-GreenroomInstance -ErrorAction SilentlyContinue
         Should -Invoke -ModuleName Greenroom Restart-GreenroomSession -Times 0
+    }
+}
+
+Describe 'Update-GreenroomInstance results' {
+
+    # One row per matching instance, including those left alone. "Already current" used to
+    # be verbose-only, so a run that changed nothing and a run that moved everything looked
+    # the same at the prompt -- and whether it moved them is the whole question.
+
+    BeforeEach {
+        Mock -ModuleName Greenroom Get-ScheduledTask {
+            @(
+                [PSCustomObject]@{ TaskName = 'greenroom-alpha' }
+                [PSCustomObject]@{ TaskName = 'greenroom-beta' }
+            )
+        }
+        Mock -ModuleName Greenroom Install-GreenroomInstance { }
+        Mock -ModuleName Greenroom Restart-GreenroomSession {
+            [PSCustomObject]@{ PSTypeName = 'Greenroom.Instance'; Instance = $Name; ClaudePid = 4242 }
+        }
+        Mock -ModuleName Greenroom Get-InstanceAssetVersion {
+            if ($Name -eq 'alpha') { [version]'0.0.1' } else { $script:Loaded }
+        }
+    }
+
+    It 'reports the moved instance as Updated, and the current one as Current' {
+        $r = @(Update-GreenroomInstance)
+        $r.Count | Should -Be 2
+        $r | ForEach-Object { $_.PSObject.TypeNames[0] | Should -Be 'Greenroom.UpdateResult' }
+
+        $a = $r | Where-Object Instance -eq 'alpha'
+        $a.Action    | Should -Be 'Updated'
+        $a.From      | Should -Be ([version]'0.0.1')
+        $a.To        | Should -Be $script:Loaded
+        $a.ClaudePid | Should -Be 4242
+
+        $b = $r | Where-Object Instance -eq 'beta'
+        $b.Action | Should -Be 'Current'
+        $b.From   | Should -Be $script:Loaded
+    }
+
+    It 'passes no instance rows through -- the restart is folded into the result' {
+        # Two object types in one pipeline render as one table with the wrong columns.
+        $r = @(Update-GreenroomInstance)
+        @($r | Where-Object { $_.PSObject.TypeNames[0] -eq 'Greenroom.Instance' }).Count | Should -Be 0
+    }
+
+    It 'reports Registered, not Updated, under -NoRestart' {
+        # The task names the new assets, but the session running now is still the old code.
+        (@(Update-GreenroomInstance -NoRestart) | Where-Object Instance -eq 'alpha').Action | Should -Be 'Registered'
+    }
+
+    It 'reports Unversioned for a path carrying no version' {
+        Mock -ModuleName Greenroom Get-InstanceAssetVersion { $null }
+        @(Update-GreenroomInstance).Action | Should -Be @('Unversioned', 'Unversioned')
+    }
+
+    It 'reports Failed alongside the error, and still reports the rest' {
+        Mock -ModuleName Greenroom Install-GreenroomInstance { if ($Name -eq 'alpha') { throw 'nope' } }
+        Mock -ModuleName Greenroom Get-InstanceAssetVersion { [version]'0.0.1' }
+        $r = @(Update-GreenroomInstance -ErrorAction SilentlyContinue -ErrorVariable e)
+        ($r | Where-Object Instance -eq 'alpha').Action | Should -Be 'Failed'
+        ($r | Where-Object Instance -eq 'beta').Action  | Should -Be 'Updated'
+        "$e" | Should -Match 'alpha'
+    }
+
+    It 'emits nothing for an instance -WhatIf declined' {
+        # -WhatIf has already said what would happen; a row claiming an Action would be false.
+        @(Update-GreenroomInstance -WhatIf | Where-Object Instance -eq 'alpha').Count | Should -Be 0
+    }
+
+    It 'has a table view with Action in it' {
+        # Five properties would otherwise render as a list.
+        $view = Get-FormatData -TypeName 'Greenroom.UpdateResult'
+        $view | Should -Not -BeNullOrEmpty
+        $view.FormatViewDefinition[0].Control.Headers.Label | Should -Contain 'Action'
     }
 }

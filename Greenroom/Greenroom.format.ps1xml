@@ -17,6 +17,15 @@
 
   Opaque is deliberately omitted from the table. It explains why Instance reads
   "(unreadable)" and is available on the object for anyone filtering on it.
+
+  AssetVersion IS shown, and is the one column that answers "did the update take". It is
+  the version the scheduled task actually runs, read from the task, which is not the
+  version Get-Module reports: module versions install side by side and the task keeps
+  naming the one that registered it. Computed and left off the table, it was the answer
+  nobody saw. Blank means unknown, not current.
+
+  Greenroom.UpdateResult is here for the same reason as the instance view: five
+  properties would render as a list, and Action is the column to read first.
 -->
 <Configuration>
   <ViewDefinitions>
@@ -54,6 +63,10 @@
             <Label>Elevated</Label>
             <Width>9</Width>
           </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>AssetVersion</Label>
+            <Width>12</Width>
+          </TableColumnHeader>
         </TableHeaders>
         <TableRowEntries>
           <TableRowEntry>
@@ -64,6 +77,49 @@
               <TableColumnItem><PropertyName>Window</PropertyName></TableColumnItem>
               <TableColumnItem><PropertyName>Visible</PropertyName></TableColumnItem>
               <TableColumnItem><PropertyName>Elevated</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>AssetVersion</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>Greenroom.UpdateResult</Name>
+      <ViewSelectedBy>
+        <TypeName>Greenroom.UpdateResult</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader>
+            <Label>Instance</Label>
+            <Width>20</Width>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>Action</Label>
+            <Width>12</Width>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>From</Label>
+            <Width>10</Width>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>To</Label>
+            <Width>10</Width>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>ClaudePid</Label>
+            <Width>10</Width>
+            <Alignment>Right</Alignment>
+          </TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Instance</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Action</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>From</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>To</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>ClaudePid</PropertyName></TableColumnItem>
             </TableColumnItems>
           </TableRowEntry>
         </TableRowEntries>
