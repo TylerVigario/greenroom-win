@@ -283,7 +283,10 @@ Describe 'Instance names ending in a dot or dash' {
 Describe 'Restart-GreenroomSession' {
 
     BeforeEach {
-        Mock -ModuleName Greenroom Get-ScheduledTask { [PSCustomObject]@{ TaskName = 'greenroom-probe' } }
+        Mock -ModuleName Greenroom Get-ScheduledTask {
+            # Honours -TaskName, so an exact lookup for an unregistered name finds nothing.
+            if ('greenroom-probe' -like $TaskName) { [PSCustomObject]@{ TaskName = 'greenroom-probe' } }
+        }
         Mock -ModuleName Greenroom Test-SelfIsInstance { $false }
         Mock -ModuleName Greenroom Assert-CanActOnInstance { $true }
         Mock -ModuleName Greenroom Stop-VerifiedProcess { 1 }
@@ -344,7 +347,10 @@ Describe 'Restart-GreenroomSession' {
 Describe 'Stop-GreenroomSession' {
 
     BeforeEach {
-        Mock -ModuleName Greenroom Get-ScheduledTask { [PSCustomObject]@{ TaskName = 'greenroom-probe' } }
+        Mock -ModuleName Greenroom Get-ScheduledTask {
+            # Honours -TaskName, so an exact lookup for an unregistered name finds nothing.
+            if ('greenroom-probe' -like $TaskName) { [PSCustomObject]@{ TaskName = 'greenroom-probe' } }
+        }
         Mock -ModuleName Greenroom Test-SelfIsInstance { $false }
         Mock -ModuleName Greenroom Assert-CanActOnInstance { $true }
         Mock -ModuleName Greenroom Stop-VerifiedProcess { 1 }
@@ -438,6 +444,9 @@ Describe 'Stop-GreenroomSession' {
     It 'matches a session whose name ends in a dash' {
         # ValidatePattern allows 'render-', and a \b word boundary does not match after a
         # non-word character -- the bug that made the kill patterns match nothing.
+        Mock -ModuleName Greenroom Get-ScheduledTask {
+            if ('greenroom-render-' -like $TaskName) { [PSCustomObject]@{ TaskName = 'greenroom-render-' } }
+        }
         Stop-GreenroomSession -Name 'render-' | Out-Null
         Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 1 -Exactly -ParameterFilter {
             $Label -eq 'session' -and
@@ -454,7 +463,10 @@ Describe 'Stop-GreenroomSession' {
 Describe 'Start-GreenroomSession' {
 
     BeforeEach {
-        Mock -ModuleName Greenroom Get-ScheduledTask { [PSCustomObject]@{ TaskName = 'greenroom-probe' } }
+        Mock -ModuleName Greenroom Get-ScheduledTask {
+            # Honours -TaskName, so an exact lookup for an unregistered name finds nothing.
+            if ('greenroom-probe' -like $TaskName) { [PSCustomObject]@{ TaskName = 'greenroom-probe' } }
+        }
         Mock -ModuleName Greenroom Start-ScheduledTask { }
         Mock -ModuleName Greenroom Start-Sleep { }
         Mock -ModuleName Greenroom Stop-VerifiedProcess { 1 }
@@ -540,7 +552,8 @@ Describe 'Start-GreenroomSession' {
 
     It 'with no name and several registered, refuses to guess' {
         Mock -ModuleName Greenroom Get-ScheduledTask {
-            [PSCustomObject]@{ TaskName = 'greenroom-a' }; [PSCustomObject]@{ TaskName = 'greenroom-b' }
+            'greenroom-a', 'greenroom-b' | Where-Object { $_ -like $TaskName } |
+                ForEach-Object { [PSCustomObject]@{ TaskName = $_ } }
         }
         { Start-GreenroomSession -ErrorAction Stop } | Should -Throw
         Should -Invoke -ModuleName Greenroom Start-ScheduledTask -Times 0
@@ -548,7 +561,8 @@ Describe 'Start-GreenroomSession' {
 
     It 'starts every registered instance a wildcard matches' {
         Mock -ModuleName Greenroom Get-ScheduledTask {
-            [PSCustomObject]@{ TaskName = 'greenroom-a' }; [PSCustomObject]@{ TaskName = 'greenroom-b' }
+            'greenroom-a', 'greenroom-b' | Where-Object { $_ -like $TaskName } |
+                ForEach-Object { [PSCustomObject]@{ TaskName = $_ } }
         }
         Start-GreenroomSession -Name '*' -TimeoutSeconds 5 -ErrorAction SilentlyContinue
         Should -Invoke -ModuleName Greenroom Start-ScheduledTask -Times 2 -Exactly
@@ -557,9 +571,84 @@ Describe 'Start-GreenroomSession' {
     It 'takes names captured before a stop, from the pipeline' {
         # The upgrade procedure: capture while running, stop, upgrade, pipe the names back.
         Mock -ModuleName Greenroom Get-ScheduledTask {
-            [PSCustomObject]@{ TaskName = 'greenroom-a' }; [PSCustomObject]@{ TaskName = 'greenroom-b' }
+            'greenroom-a', 'greenroom-b' | Where-Object { $_ -like $TaskName } |
+                ForEach-Object { [PSCustomObject]@{ TaskName = $_ } }
         }
         'a', 'b' | Start-GreenroomSession -TimeoutSeconds 5 -ErrorAction SilentlyContinue
         Should -Invoke -ModuleName Greenroom Start-ScheduledTask -Times 2 -Exactly
+    }
+}
+
+Describe 'Wildcards on Stop- and Restart-GreenroomSession' {
+
+    # A pattern fans out into one call per resolved instance, so each gets the full
+    # single-instance path. The properties worth pinning: every match is acted on, -WhatIf
+    # survives the fan-out, and a refusal for one instance does not abandon the rest.
+
+    BeforeEach {
+        Mock -ModuleName Greenroom Get-ScheduledTask {
+            'greenroom-a', 'greenroom-b' | Where-Object { $_ -like $TaskName } |
+                ForEach-Object { [PSCustomObject]@{ TaskName = $_ } }
+        }
+        Mock -ModuleName Greenroom Test-SelfIsInstance { $false }
+        Mock -ModuleName Greenroom Assert-CanActOnInstance { $true }
+        Mock -ModuleName Greenroom Stop-VerifiedProcess { 1 }
+        Mock -ModuleName Greenroom Stop-ScheduledTask { }
+        Mock -ModuleName Greenroom Start-ScheduledTask { }
+        Mock -ModuleName Greenroom Start-Sleep { }
+        Mock -ModuleName Greenroom Test-InstanceElevated { $false }
+        Mock -ModuleName Greenroom Test-SelfElevated { $false }
+        Mock -ModuleName Greenroom Get-InstanceAssetVersion { $null }
+        Mock -ModuleName Greenroom Get-GreenroomInstance { }
+    }
+
+    It 'Stop acts on every registered instance a wildcard matches' {
+        $r = @(Stop-GreenroomSession -Name '*' -SettleSeconds 0)
+        $r.Instance | Should -Be @('a', 'b')
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 6 -Exactly
+    }
+
+    It 'Restart acts on every registered instance a wildcard matches' {
+        Restart-GreenroomSession -Name '*' -TimeoutSeconds 5 -ErrorAction SilentlyContinue
+        Should -Invoke -ModuleName Greenroom Start-ScheduledTask -Times 2 -Exactly
+    }
+
+    It 'a pattern only matches what it says' {
+        $r = @(Stop-GreenroomSession -Name 'b*' -SettleSeconds 0)
+        $r.Instance | Should -Be @('b')
+    }
+
+    It 'warns and does nothing when a pattern matches no instance' {
+        Stop-GreenroomSession -Name 'zzz*' -WarningVariable w -WarningAction SilentlyContinue
+        ($w -join ' ') | Should -Match 'zzz'
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 0
+    }
+
+    It '-WhatIf survives the fan-out' {
+        Stop-GreenroomSession -Name '*' -WhatIf
+        Restart-GreenroomSession -Name '*' -WhatIf
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 0
+        Should -Invoke -ModuleName Greenroom Start-ScheduledTask -Times 0
+    }
+
+    It 'refusing the instance the shell is inside does NOT abandon the others' {
+        # The reason this fans out rather than looping inside one call: the single-instance
+        # body refuses by returning early, and in a loop that return would silently skip
+        # every instance after the refused one.
+        Mock -ModuleName Greenroom Test-SelfIsInstance { $Name -eq 'a' }
+        $r = @(Stop-GreenroomSession -Name '*' -SettleSeconds 0 -ErrorAction SilentlyContinue -ErrorVariable e)
+        $r.Instance | Should -Be @('b')
+        $e.Count    | Should -BeGreaterThan 0
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 3 -Exactly
+    }
+
+    It 'with no name and several registered, Stop refuses to guess' {
+        { Stop-GreenroomSession -ErrorAction Stop } | Should -Throw
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 0
+    }
+
+    It 'with no name and several registered, Restart refuses to guess' {
+        { Restart-GreenroomSession -ErrorAction Stop } | Should -Throw
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 0
     }
 }

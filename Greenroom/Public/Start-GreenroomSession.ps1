@@ -73,30 +73,7 @@ function Start-GreenroomSession {
     )
 
     process {
-        # Registration IS the scheduled task, as in Update-GreenroomInstance: a task is the
-        # thing that gets started, so an instance without one cannot be.
-        $registered = @(Get-ScheduledTask -TaskName 'greenroom-*' -ErrorAction SilentlyContinue |
-                        ForEach-Object { $_.TaskName -replace '^greenroom-', '' })
-
-        if (-not $Name) {
-            if ($registered.Count -eq 1) { $names = $registered }
-            else {
-                Write-Error -Category InvalidArgument -Message (
-                    "an instance name is required. Registered: $($registered -join ', ')")
-                return
-            }
-        }
-        elseif ([System.Management.Automation.WildcardPattern]::ContainsWildcardCharacters($Name)) {
-            $names = @($registered | Where-Object { $_ -like $Name } | Sort-Object)
-            if ($names.Count -eq 0) { Write-Warning "no registered instance matches '$Name'"; return }
-        }
-        else {
-            if ($registered -notcontains $Name) {
-                Write-Error -Category ObjectNotFound -Message "no scheduled task 'greenroom-$Name' -- is '$Name' installed?"
-                return
-            }
-            $names = @($Name)
-        }
+        $names = @(Resolve-InstanceName -Name $Name)
 
         foreach ($n in $names) {
             $now = @(Get-GreenroomInstance -Name $n -WarningAction SilentlyContinue -ErrorAction SilentlyContinue)

@@ -43,8 +43,9 @@
   having.
 
 .PARAMETER Name
-  The instance to stop. If omitted and exactly one instance is installed, that one is
-  used. Accepts pipeline input, including Greenroom.Instance objects.
+  The instance to stop. Wildcards match every registered instance, so
+  `Stop-GreenroomSession *` acts on all of them. If omitted and exactly one instance is
+  registered, that one is used. Accepts pipeline input, including Greenroom.Instance objects.
 
 .PARAMETER NoElevate
   Do not escalate when the instance runs elevated. Fails instead.
@@ -81,6 +82,7 @@ function Stop-GreenroomSession {
     param(
         [Parameter(Position = 0, ValueFromPipeline, ValueFromPipelineByPropertyName)]
         [Alias('Instance')]
+        [SupportsWildcards()]
         [string]$Name,
 
         [switch]$NoElevate,
@@ -90,21 +92,22 @@ function Stop-GreenroomSession {
     )
 
     process {
-        if (-not $Name) {
-            $known = @(Get-ChildItem (Get-GreenroomStateRoot) -Directory -ErrorAction SilentlyContinue)
-            if ($known.Count -eq 1) { $Name = $known[0].Name }
-            else {
-                Write-Error -Category InvalidArgument -Message (
-                    "an instance name is required. Installed: $($known.Name -join ', ')")
-                return
-            }
+        # A pattern or an omitted name fans out into one call per resolved instance, so the
+        # single-instance path below -- self guard, ShouldProcess, escalation -- runs
+        # unchanged for each. Every other bound parameter, common ones included, is
+        # forwarded; -WhatIf and -Confirm also travel on their preference variables, which a
+        # called function inherits. Rewriting the body as a loop instead would have turned
+        # each of its early `return`s into a silent abandonment of the remaining instances.
+        $names = @(Resolve-InstanceName -Name $Name)
+        if ($names.Count -eq 0) { return }
+        if ($names.Count -gt 1 -or $names[0] -ne $Name) {
+            $fwd = @{} + $PSBoundParameters
+            [void]$fwd.Remove('Name')
+            foreach ($n in $names) { Stop-GreenroomSession -Name $n @fwd }
+            return
         }
 
         $task = "greenroom-$Name"
-        if (-not (Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue)) {
-            Write-Error -Category ObjectNotFound -Message "no scheduled task '$task' -- is '$Name' installed?"
-            return
-        }
 
         if (Test-SelfIsInstance -Name $Name) {
             Write-Error -Category InvalidOperation -Message (
