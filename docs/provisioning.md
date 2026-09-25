@@ -276,7 +276,9 @@ posture:
 - **Show and Hide prompt for elevation.** UIPI stops a normal shell from showing or hiding
   an elevated window, and the calls fail by returning `false` rather than erroring — so the
   command re-launches itself through UAC and the elevated copy does the work. Pass
-  `-NoElevate` to get a plain refusal instead.
+  `-NoElevate` to get a plain refusal instead. `Stop-` and `Restart-GreenroomSession`
+  escalate the same way, but **once per command**: `Stop-GreenroomSession *` raises one
+  prompt for every elevated instance it matched, after the others have been handled.
 - **`Get-GreenroomInstance` has a blind spot unless it is run elevated too.**
   `Win32_Process.CommandLine` reads as NULL across integrity levels, and that is how
   instances are named — so from an ordinary shell an elevated session shows as `Opaque`

@@ -48,7 +48,9 @@
   registered, that one is used. Accepts pipeline input, including Greenroom.Instance objects.
 
 .PARAMETER NoElevate
-  Do not escalate when the instance runs elevated. Fails instead.
+  Do not escalate when the instance runs elevated. Fails instead. Without it, an elevated
+  instance is handed to an elevated copy through UAC -- ONE prompt for every elevated
+  instance a pattern or pipeline matched, raised after the others have been stopped.
 
 .PARAMETER SettleSeconds
   How long to watch for the session coming back before reporting. Default 5. A
@@ -97,6 +99,11 @@ function Stop-GreenroomSession {
         # six instances blocked for thirty seconds of pure sleep to learn what one pass
         # learns in five.
         $stopped = [System.Collections.Generic.List[object]]::new()
+
+        # Elevated instances this shell cannot act on, escalated together in `end` so that
+        # one UAC prompt covers all of them -- whether they came from one pattern or were
+        # piped in one at a time.
+        $deferred = [System.Collections.Generic.List[string]]::new()
     }
 
     process {
@@ -121,13 +128,9 @@ function Stop-GreenroomSession {
             # defaults over there, and -Confirm must prompt in the shell the operator typed in.
             if (-not $PSCmdlet.ShouldProcess($n, 'Stop-GreenroomSession')) { continue }
 
-            # Escalation can THROW -- a declined UAC prompt does -- and an uncaught throw ends
-            # the loop, abandoning every instance after this one. Caught here and reported
-            # through this command's error stream, so -ErrorAction still decides: Stop ends
-            # the run, anything else moves on to the next instance.
-            try { $proceed = Assert-CanActOnInstance -Name $n -Command 'Stop-GreenroomSession' -NoElevate:$NoElevate }
-            catch { $PSCmdlet.WriteError($_); continue }
-            if (-not $proceed) { continue }
+            if (-not (Assert-CanActOnInstance -Name $n -Command 'Stop-GreenroomSession' -NoElevate:$NoElevate -Defer $deferred)) {
+                continue
+            }
 
             # Before the kills, so the trigger cannot launch a replacement watchdog while
             # they run. This only ends a task currently executing; it does not disable it.
@@ -147,6 +150,11 @@ function Stop-GreenroomSession {
     }
 
     end {
+        # The elevated copy stops and settles its own instances, and its results do not
+        # cross back -- only whether it succeeded does -- so they are reported here as an
+        # error or not at all, as they were when each was escalated on its own.
+        if ($deferred.Count) { Invoke-DeferredElevation -Command 'Stop-GreenroomSession' -Name $deferred -Cmdlet $PSCmdlet }
+
         # Confirm by observation, not by the kills returning. "Stopped" is only meaningful
         # if it is still stopped a moment later: a watchdog that was missed -- one belonging
         # to a stale asset version, say, whose command line does not match the pattern --

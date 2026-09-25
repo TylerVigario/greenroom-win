@@ -19,16 +19,21 @@
   The module is imported BY PATH, not by name. Resolving by name would depend on
   PSModulePath being identical in the elevated context, and an explicit path removes
   that dependency entirely.
+
+  Takes SEVERAL names, so one prompt covers every elevated instance a command matched.
+  They are piped to the command rather than passed as -Name, which takes one name: piped,
+  they reach one invocation, so Stop-GreenroomSession over there still settles once.
 #>
 function Invoke-ElevatedSelf {
     [CmdletBinding()]
     [OutputType([int])]
     param(
         [Parameter(Mandatory)][string]$Command,
-        [Parameter(Mandatory)][string]$Name
+        [Parameter(Mandatory)][string[]]$Name
     )
 
-    Write-Warning "'$Name' runs elevated and this shell does not. Re-launching elevated..."
+    $list = ($Name | ForEach-Object { "'$_'" }) -join ', '
+    Write-Warning "$list $(if ($Name.Count -eq 1) { 'runs' } else { 'run' }) elevated and this shell does not. Re-launching elevated..."
 
     # Single-quoted inside the -Command string so nothing is re-interpreted by the
     # elevated shell, with embedded quotes doubled -- which is how PowerShell escapes a
@@ -37,8 +42,8 @@ function Invoke-ElevatedSelf {
     # The instance name cannot contain one (ValidatePattern allows only letters, digits,
     # dot, dash and underscore) but THE MODULE PATH CAN: a home directory belonging to
     # someone called O'Brien is enough to break the command otherwise.
-    $manifest = (Join-Path $script:GreenroomModuleRoot 'Greenroom.psd1').Replace("'", "''")
-    $safeName = $Name.Replace("'", "''")
+    $manifest  = (Join-Path $script:GreenroomModuleRoot 'Greenroom.psd1').Replace("'", "''")
+    $safeNames = ($Name | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ','
 
     # -Confirm:$false, deliberately. The caller has ALREADY passed its own ShouldProcess
     # gate before escalating, so the decision is made; a fresh process would otherwise
@@ -53,11 +58,18 @@ function Invoke-ElevatedSelf {
     # reported here as success, and the caller then skipped acting locally on the
     # strength of work that never happened.
     #
+    # The command itself runs with -ErrorAction Continue, overriding that Stop, because a
+    # batch must carry on past one instance's failure exactly as the local loop does; its
+    # errors are counted through -ErrorVariable instead. MEASURED in a child process: an
+    # error from the second of three names still let the third run, and exited 1 -- as
+    # did an error written by a helper the command called rather than by the command.
+    #
     # The error TEXT is still lost, because the elevated window closes as it exits.
     # The exit code is what crosses the boundary, so it has to be right.
     $inner = "`$ErrorActionPreference='Stop'; " +
-             "try { Import-Module '$manifest' -Force; " +
-             "$Command -Name '$safeName' -NoElevate -Confirm:`$false; exit 0 } " +
+             "try { Import-Module '$manifest' -Force; `$ev = `$null; " +
+             "$safeNames | $Command -NoElevate -Confirm:`$false -ErrorAction Continue -ErrorVariable ev; " +
+             "exit ([int](`$ev.Count -gt 0)) } " +
              'catch { exit 1 }'
 
     try {
@@ -68,7 +80,45 @@ function Invoke-ElevatedSelf {
     catch {
         # The usual cause is the UAC prompt being dismissed, which is a decision rather
         # than a fault, so it is reported as one.
-        throw "elevation declined or failed -- '$Name' was not changed. To do it by hand: Start-Process pwsh -Verb RunAs -ArgumentList '-NoExit','-Command',`"$inner`""
+        throw "elevation declined or failed -- $list $(if ($Name.Count -eq 1) { 'was' } else { 'were' }) not changed. To do it by hand: Start-Process pwsh -Verb RunAs -ArgumentList '-NoExit','-Command',`"$inner`""
+    }
+}
+
+<#
+  Escalate, once, every instance a command deferred with Assert-CanActOnInstance -Defer.
+
+  Reports through the CALLER's $PSCmdlet, as Resolve-InstanceName does, so a declined
+  prompt or a failed elevated run names the command that was typed and obeys its
+  -ErrorAction. A declined prompt is caught rather than left to unwind: it is one failure
+  to report, not a reason to skip what the caller still has to do after it.
+#>
+function Invoke-DeferredElevation {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Command,
+        [Parameter(Mandatory)][string[]]$Name,
+        [Parameter(Mandatory)][System.Management.Automation.PSCmdlet]$Cmdlet
+    )
+
+    # A NEW record, not the caught one re-written: that would keep its origin, and name
+    # Invoke-ElevatedSelf to the operator instead of the command they typed.
+    try { $code = Invoke-ElevatedSelf -Command $Command -Name $Name }
+    catch {
+        $Cmdlet.WriteError([System.Management.Automation.ErrorRecord]::new(
+            [System.OperationCanceledException]::new($_.Exception.Message, $_.Exception),
+            'ElevationDeclined', [System.Management.Automation.ErrorCategory]::PermissionDenied, $Name))
+        return
+    }
+
+    if ($code -ne 0) {
+        # Only an exit code crosses back, so which of several instances failed is not
+        # knowable from here. Say that rather than guess.
+        $list = ($Name | ForEach-Object { "'$_'" }) -join ', '
+        $Cmdlet.WriteError([System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new(
+                "the elevated '$Command' for $list exited with code $code. Its error text does not " +
+                "cross back; run '$Command' from an elevated shell to see it."),
+            'ElevatedRunFailed', [System.Management.Automation.ErrorCategory]::NotSpecified, $Name))
     }
 }
 
@@ -77,6 +127,12 @@ function Invoke-ElevatedSelf {
 
   Returns $true when the caller should proceed itself, $false when the work has
   already been done by an elevated copy.
+
+  With -Defer, escalation is NOT done here: the name is added to that list, $false is
+  returned, and the caller escalates the whole list once, with Invoke-DeferredElevation.
+  That is for commands that act on several instances. Escalating each as it came up
+  raised one UAC prompt PER ELEVATED INSTANCE, so `Stop-GreenroomSession *` on a host
+  with three of them asked three times for one decision.
 #>
 function Assert-CanActOnInstance {
     [CmdletBinding()]
@@ -84,7 +140,8 @@ function Assert-CanActOnInstance {
     param(
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][string]$Command,
-        [switch]$NoElevate
+        [switch]$NoElevate,
+        [System.Collections.Generic.List[string]]$Defer
     )
 
     # config.json is readable at any integrity level, so its flag is trustworthy even
@@ -112,6 +169,9 @@ function Assert-CanActOnInstance {
             'escalated automatically.')
         return $false
     }
+
+    # $null, not truthiness: the list is EMPTY the first time, and an empty list is falsy.
+    if ($null -ne $Defer) { $Defer.Add($Name); return $false }
 
     $code = Invoke-ElevatedSelf -Command $Command -Name $Name
     if ($code -ne 0) {
