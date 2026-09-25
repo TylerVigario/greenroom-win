@@ -92,8 +92,8 @@ Describe 'Resolve-InstallParameter' {
 
         It 'does NOT pin an auto-detected claude.exe' {
             # config.json records the RESOLVED path. Inheriting it unconditionally would
-            # freeze whatever auto-detection picked and defeat the WinGet Links shim,
-            # which is package-ID-keyed and survives upgrades.
+            # freeze whatever auto-detection picked, so a re-run could never follow a
+            # change in PATH -- which is what resolution is meant to track.
             WritePrevConfig @{ workingDirectory = 'D:\w'; claudeExe = 'C:\auto\claude.exe'; claudeExeExplicit = $false }
             $r = Resolve
             $r.ClaudeExe         | Should -BeNullOrEmpty

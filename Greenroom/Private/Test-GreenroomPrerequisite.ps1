@@ -38,12 +38,29 @@ function Resolve-GreenroomPrerequisite {
     $wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
     if (-not (Test-Path $wscript)) { throw "wscript.exe not found at $wscript" }
 
-    # Candidate ORDER matters. WinGet's Links shim goes first because it is keyed on
-    # PACKAGE ID rather than version, so the path survives upgrades and what lands in
-    # config.json stays valid.
+    # Candidate ORDER matters, and PATH decides it. Whatever `claude` resolves to in the
+    # operator's own shell is what the supervised session should run. greenroom does not
+    # install Claude Code, so ranking the ways it can be installed is not its business --
+    # and the list would have to be maintained against someone else's distribution matrix
+    # forever: native, npm, WinGet, two Homebrew casks, apt, dnf, apk.
+    #
+    # A hard-coded WinGet Links entry came FIRST until this changed, justified by that path
+    # being keyed on package ID rather than version, so it survives upgrades. That is true
+    # and not distinctive: EVERY Windows install path for this CLI is version-stable. The
+    # WinGet package directory carries no version segment either, the native launcher at
+    # ~\.local\bin keeps its versions under ~\.local\share\claude\versions, and the npm shim
+    # is fixed as well. So the preference bought nothing the alternatives lacked.
+    #
+    # What it DID do was outrank a newer install silently. A package-manager install caps
+    # itself at whatever the manifest offers -- `claude doctor` says so outright,
+    # "Auto-updates: Managed by package manager" -- so on a host carrying both, greenroom
+    # chose the one that cannot update itself. MEASURED: WinGet at 2.1.268 preferred over a
+    # native 2.1.282 that PATH already ranked first, with a green line and no warning.
+    #
+    # ~\.local\bin stays as a LAST resort, for a native install whose directory is not on
+    # PATH. In the normal case PATH reaches it and this entry is never used.
     $candidates = @()
     if ($ClaudeExe) { $candidates += $ClaudeExe }
-    $candidates += (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\claude.exe')
     $candidates += (Get-Command claude.exe -All -ErrorAction SilentlyContinue | ForEach-Object Source)
     $candidates += (Join-Path $env:USERPROFILE '.local\bin\claude.exe')
 
