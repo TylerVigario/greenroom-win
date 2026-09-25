@@ -64,7 +64,7 @@ function Uninstall-GreenroomInstance {
         # directory, so reading it afterwards always returns $null.
         $cfg = Get-InstanceConfig -Name $Name
 
-        $taskExists = [bool](Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue)
+        $taskExists = [bool](Get-ScheduledTask -TaskPath '\' -TaskName $task -ErrorAction Ignore)
         if (-not $taskExists -and -not (Test-Path $stateDir)) {
             Write-Error -Category ObjectNotFound -Message "'$Name' is not installed: no task '$task' and no state directory."
             return

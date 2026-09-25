@@ -29,7 +29,7 @@ function Get-InstanceAssetVersion {
     [OutputType([version])]
     param([Parameter(Mandatory)][string]$Name)
 
-    $task = Get-ScheduledTask -TaskName "greenroom-$Name" -ErrorAction SilentlyContinue
+    $task = Get-ScheduledTask -TaskPath '\' -TaskName "greenroom-$Name" -ErrorAction Ignore
     if (-not $task) { return $null }
 
     foreach ($action in @($task.Actions)) {

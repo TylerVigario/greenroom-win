@@ -73,7 +73,7 @@ function Start-GreenroomSession {
     )
 
     process {
-        $names = @(Resolve-InstanceName -Name $Name)
+        $names = @(Resolve-InstanceName -Name $Name -Cmdlet $PSCmdlet)
 
         foreach ($n in $names) {
             $now = @(Get-GreenroomInstance -Name $n -WarningAction SilentlyContinue -ErrorAction SilentlyContinue)

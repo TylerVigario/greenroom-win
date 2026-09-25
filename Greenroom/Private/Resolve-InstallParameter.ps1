@@ -98,7 +98,7 @@ function Resolve-InstallParameter {
             # config.json only started recording triggerDelay later, so an instance
             # installed before that has nothing to inherit. The registered task is the
             # authoritative record of the delay actually in force.
-            $existing = Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
+            $existing = Get-ScheduledTask -TaskPath '\' -TaskName $task -ErrorAction Ignore
             $fromTask = if ($existing -and $existing.Triggers) { $existing.Triggers[0].Delay } else { $null }
             if ($fromTask) {
                 $TriggerDelay = $fromTask

@@ -88,12 +88,19 @@ Update-GreenroomInstance                          # after a module upgrade
 Uninstall-GreenroomInstance -Name desktop-admin
 ```
 
-The name can be omitted **when exactly one instance is installed** — for the visibility
-commands, `Restart-`, `Start-` and `Stop-`. `Start-`, `Stop-` and `Restart-` also take wildcards, matched against registered instances:
-`Stop-GreenroomSession *`, `Restart-GreenroomSession render-*`. The other two differ, deliberately: `Update-GreenroomInstance`
-with no name updates **every** instance whose assets are behind, and `Uninstall-` always
-requires `-Name`, because removing the wrong instance is not a mistake worth making
-convenient.
+The name can be omitted when there is exactly one candidate, and what counts as a
+candidate follows what the command acts on:
+
+- **`Show-`, `Hide-`, `Switch-`** — exactly one **running** instance, since they act on its
+  window.
+- **`Start-`, `Stop-`, `Restart-`** — exactly one **registered** instance (one scheduled
+  task), since a stopped instance has no window to find. These three also take wildcards,
+  matched against registered instances: `Stop-GreenroomSession *`,
+  `Restart-GreenroomSession render-*`.
+
+The other two differ, deliberately: `Update-GreenroomInstance` with no name updates
+**every** instance whose assets are behind, and `Uninstall-` always requires `-Name`,
+because removing the wrong instance is not a mistake worth making convenient.
 
 `Show-` and `Hide-` are approved verbs and they are also literally what happens: the
 window exists the whole time and these call `ShowWindow` on it. "Attach" was always a

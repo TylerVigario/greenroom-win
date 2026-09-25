@@ -91,100 +91,112 @@ function Stop-GreenroomSession {
         [int]$SettleSeconds = 5
     )
 
+    begin {
+        # Stopped instances are collected and settled together in `end`, once. Settling
+        # inside the loop slept a full SettleSeconds after EACH instance, so `Stop *` over
+        # six instances blocked for thirty seconds of pure sleep to learn what one pass
+        # learns in five.
+        $stopped = [System.Collections.Generic.List[object]]::new()
+    }
+
     process {
-        # A pattern or an omitted name fans out into one call per resolved instance, so the
-        # single-instance path below -- self guard, ShouldProcess, escalation -- runs
-        # unchanged for each. Every other bound parameter, common ones included, is
-        # forwarded; -WhatIf and -Confirm also travel on their preference variables, which a
-        # called function inherits. Rewriting the body as a loop instead would have turned
-        # each of its early `return`s into a silent abandonment of the remaining instances.
-        $names = @(Resolve-InstanceName -Name $Name)
-        if ($names.Count -eq 0) { return }
-        if ($names.Count -gt 1 -or $names[0] -ne $Name) {
-            $fwd = @{} + $PSBoundParameters
-            [void]$fwd.Remove('Name')
-            foreach ($n in $names) { Stop-GreenroomSession -Name $n @fwd }
-            return
+        # ONE INVOCATION, looping, as Start-GreenroomSession does. This replaced a fan-out
+        # that re-invoked the command once per matched instance, and that was wrong in
+        # three ways: -Confirm's "Yes to All" and "No to All" reset for every nested call,
+        # since each had its own ShouldProcess state; a THROW in one nested call -- a
+        # declined UAC prompt -- unwound through the loop and abandoned every instance after
+        # it; and each nested call resolved its name all over again.
+        foreach ($n in @(Resolve-InstanceName -Name $Name -Cmdlet $PSCmdlet)) {
+            if (Test-SelfIsInstance -Name $n) {
+                Write-Error -Category InvalidOperation -Message (
+                    "'$n' is the session this shell is running inside. Stopping it from here would kill " +
+                    'this process part-way through, so the settle check would never run and this could not ' +
+                    'report whether it stayed down. Run it from a shell outside the session.')
+                continue
+            }
+
+            # Gated before escalation, for the same reason Restart-GreenroomSession gates
+            # there: a new elevated process starts with its own $WhatIfPreference and
+            # $ConfirmPreference, so -WhatIf must stop here rather than be re-decided against
+            # defaults over there, and -Confirm must prompt in the shell the operator typed in.
+            if (-not $PSCmdlet.ShouldProcess($n, 'Stop-GreenroomSession')) { continue }
+
+            # Escalation can THROW -- a declined UAC prompt does -- and an uncaught throw ends
+            # the loop, abandoning every instance after this one. Caught here and reported
+            # through this command's error stream, so -ErrorAction still decides: Stop ends
+            # the run, anything else moves on to the next instance.
+            try { $proceed = Assert-CanActOnInstance -Name $n -Command 'Stop-GreenroomSession' -NoElevate:$NoElevate }
+            catch { $PSCmdlet.WriteError($_); continue }
+            if (-not $proceed) { continue }
+
+            # Before the kills, so the trigger cannot launch a replacement watchdog while
+            # they run. This only ends a task currently executing; it does not disable it.
+            Stop-ScheduledTask -TaskName "greenroom-$n" -ErrorAction SilentlyContinue
+
+            $esc    = [regex]::Escape($n)
+            $shells = 'pwsh.exe', 'powershell.exe'
+
+            $watchdog = Stop-VerifiedProcess -ProcessName $shells      -Pattern ('greenroom-watchdog.*-Instance\s+"?' + $esc + '("|\s|$)') -Label 'watchdog'
+            $session  = Stop-VerifiedProcess -ProcessName 'claude.exe' -Pattern ('--remote-control\s+"?' + $esc + '("|\s|$)')                 -Label 'session'
+            $launcher = Stop-VerifiedProcess -ProcessName $shells      -Pattern ('greenroom-launch.*-Instance\s+"?' + $esc + '("|\s|$)')   -Label 'launcher'
+
+            if (($watchdog + $session + $launcher) -eq 0) { Write-Verbose "nothing was running for '$n'" }
+
+            $stopped.Add([PSCustomObject]@{ Instance = $n; Watchdog = $watchdog; Session = $session; Launcher = $launcher })
         }
+    }
 
-        $task = "greenroom-$Name"
-
-        if (Test-SelfIsInstance -Name $Name) {
-            Write-Error -Category InvalidOperation -Message (
-                "'$Name' is the session this shell is running inside. Stopping it from here would kill " +
-                'this process part-way through, so the settle check would never run and this could not ' +
-                'report whether it stayed down. Run it from a shell outside the session.')
-            return
-        }
-
-        # Gated before escalation, for the same reason Restart-GreenroomSession gates
-        # there: a new elevated process starts with its own $WhatIfPreference and
-        # $ConfirmPreference, so -WhatIf must stop here rather than be re-decided against
-        # defaults over there, and -Confirm must prompt in the shell the operator typed in.
-        if (-not $PSCmdlet.ShouldProcess($Name, 'Stop-GreenroomSession')) { return }
-
-        if (-not (Assert-CanActOnInstance -Name $Name -Command 'Stop-GreenroomSession' -NoElevate:$NoElevate)) {
-            return
-        }
-
-        # Before the kills, so the trigger cannot launch a replacement watchdog while
-        # they run. This only ends a task currently executing; it does not disable it.
-        Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
-
-        $esc    = [regex]::Escape($Name)
-        $shells = 'pwsh.exe', 'powershell.exe'
-
-        $watchdog = Stop-VerifiedProcess -ProcessName $shells      -Pattern ('greenroom-watchdog.*-Instance\s+"?' + $esc + '("|\s|$)') -Label 'watchdog'
-        $session  = Stop-VerifiedProcess -ProcessName 'claude.exe' -Pattern ('--remote-control\s+"?' + $esc + '("|\s|$)')                 -Label 'session'
-        $launcher = Stop-VerifiedProcess -ProcessName $shells      -Pattern ('greenroom-launch.*-Instance\s+"?' + $esc + '("|\s|$)')   -Label 'launcher'
-
-        if (($watchdog + $session + $launcher) -eq 0) { Write-Verbose "nothing was running for '$Name'" }
-
-        # Confirm by observation, not by the kills returning. "Stopped" is only
-        # meaningful if it is still stopped a moment later: a watchdog that was missed --
-        # one belonging to a stale asset version, say, whose command line does not match
-        # the pattern -- puts the session straight back, and the counts above would still
-        # look like success.
+    end {
+        # Confirm by observation, not by the kills returning. "Stopped" is only meaningful
+        # if it is still stopped a moment later: a watchdog that was missed -- one belonging
+        # to a stale asset version, say, whose command line does not match the pattern --
+        # puts the session straight back, and the counts would still look like success.
+        #
         # Counted iterations rather than a wall-clock deadline. A deadline loop with the
         # sleep inside it degenerates into a busy-wait the moment the sleep does not
-        # actually sleep -- which is exactly what happens under test, where it spun for
-        # the full settle period burning CPU instead of taking ten cheap turns.
-        $stayedDown = $true
-        if ($SettleSeconds -gt 0) {
-            $polls = $SettleSeconds * 2
-            for ($i = 0; $i -lt $polls; $i++) {
+        # actually sleep -- which is exactly what happens under test.
+        $cameBack = @{}
+        if ($SettleSeconds -gt 0 -and $stopped.Count -gt 0) {
+            for ($i = 0; $i -lt $SettleSeconds * 2; $i++) {
                 Start-Sleep -Milliseconds 500
-                $back = @(Get-GreenroomInstance -Name $Name -WarningAction SilentlyContinue -ErrorAction SilentlyContinue)
-                if ($back.Count -gt 0 -and -not $back[0].Opaque) {
-                    $stayedDown = $false
-                    Write-Warning ("'$Name' came back up while settling -- something is still supervising it. " +
-                                   "Check for a watchdog from a different module version: Get-CimInstance Win32_Process " +
-                                   "-Filter `"Name='pwsh.exe'`" | Where-Object CommandLine -match 'greenroom-watchdog'")
-                    break
+                foreach ($s in $stopped) {
+                    if ($cameBack.ContainsKey($s.Instance)) { continue }
+                    $back = @(Get-GreenroomInstance -Name $s.Instance -WarningAction SilentlyContinue -ErrorAction SilentlyContinue)
+                    if ($back.Count -gt 0 -and -not $back[0].Opaque) {
+                        $cameBack[$s.Instance] = $true
+                        Write-Warning ("'$($s.Instance)' came back up while settling -- something is still supervising it. " +
+                                       "Check for a watchdog from a different module version: Get-CimInstance Win32_Process " +
+                                       "-Filter `"Name='pwsh.exe'`" | Where-Object CommandLine -match 'greenroom-watchdog'")
+                    }
                 }
+                if ($cameBack.Count -eq $stopped.Count) { break }
             }
         }
 
-        # An unelevated shell cannot read an elevated session's command line, so absence
-        # is not evidence here. Saying so beats reporting a confirmation that was never made.
-        $confirmed = $stayedDown
-        if ((Test-InstanceElevated -Name $Name) -and -not (Test-SelfElevated)) {
-            $confirmed = $false
-            Write-Warning ("cannot confirm '$Name' stopped from an unelevated shell: an elevated session is " +
-                           'unreadable here. Re-check with Get-GreenroomInstance from an elevated shell.')
-        }
+        foreach ($s in $stopped) {
+            $stayedDown = -not $cameBack.ContainsKey($s.Instance)
 
-        # Returned rather than printed, matching Uninstall-GreenroomInstance: the facts
-        # about what stopped are the ones an operator needs, and as data they can be
-        # asserted on instead of read.
-        [PSCustomObject]@{
-            PSTypeName      = 'Greenroom.StopResult'
-            Instance        = $Name
-            WatchdogStopped = $watchdog
-            SessionStopped  = $session
-            LauncherStopped = $launcher
-            StayedDown      = $stayedDown
-            Confirmed       = $confirmed
+            # An unelevated shell cannot read an elevated session's command line, so absence
+            # is not evidence here. Saying so beats reporting a confirmation never made.
+            $confirmed = $stayedDown
+            if ((Test-InstanceElevated -Name $s.Instance) -and -not (Test-SelfElevated)) {
+                $confirmed = $false
+                Write-Warning ("cannot confirm '$($s.Instance)' stopped from an unelevated shell: an elevated " +
+                               'session is unreadable here. Re-check with Get-GreenroomInstance from an elevated shell.')
+            }
+
+            # Returned rather than printed, matching Uninstall-GreenroomInstance: the facts
+            # about what stopped are the ones an operator needs, and as data they can be
+            # asserted on instead of read.
+            [PSCustomObject]@{
+                PSTypeName      = 'Greenroom.StopResult'
+                Instance        = $s.Instance
+                WatchdogStopped = $s.Watchdog
+                SessionStopped  = $s.Session
+                LauncherStopped = $s.Launcher
+                StayedDown      = $stayedDown
+                Confirmed       = $confirmed
+            }
         }
     }
 }
