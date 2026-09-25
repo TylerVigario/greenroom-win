@@ -98,10 +98,18 @@ restarting only re-takes it.
 Take the instances down, upgrade, bring them back:
 
 ```powershell
-Get-GreenroomInstance | Stop-GreenroomSession
+$running = (Get-GreenroomInstance).Instance
+$running | Stop-GreenroomSession
 winget upgrade --id Anthropic.ClaudeCode
-Get-GreenroomInstance | Restart-GreenroomSession
+$running | Start-GreenroomSession
 ```
+
+**Capture the names first.** `Get-GreenroomInstance` lists *running* sessions, so once
+they are stopped it returns nothing. The 0.4.0 version of this procedure piped a fresh
+`Get-GreenroomInstance` into the restart, which therefore brought nothing back. Capturing
+also restores exactly what was running, and not an instance that was down on purpose.
+`Start-GreenroomSession *` is the blunter alternative: every registered instance that is
+not running.
 
 **Stopping the instances is not always enough.** An interactive Claude Code session holds
 the same binary, including the one you may be running these commands inside. MEASURED:

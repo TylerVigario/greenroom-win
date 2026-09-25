@@ -450,3 +450,116 @@ Describe 'Stop-GreenroomSession' {
         Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 3 -Exactly
     }
 }
+
+Describe 'Start-GreenroomSession' {
+
+    BeforeEach {
+        Mock -ModuleName Greenroom Get-ScheduledTask { [PSCustomObject]@{ TaskName = 'greenroom-probe' } }
+        Mock -ModuleName Greenroom Start-ScheduledTask { }
+        Mock -ModuleName Greenroom Start-Sleep { }
+        Mock -ModuleName Greenroom Stop-VerifiedProcess { 1 }
+        Mock -ModuleName Greenroom Get-InstanceAssetVersion { $null }
+        Mock -ModuleName Greenroom Test-InstanceElevated { $false }
+        Mock -ModuleName Greenroom Test-SelfElevated { $false }
+        # Stopped by default: nothing running, and nothing ever comes up.
+        Mock -ModuleName Greenroom Get-GreenroomInstance { }
+    }
+
+    AfterEach { Remove-Variable -Name GrStartCalls -Scope Script -ErrorAction SilentlyContinue }
+
+    It 'starts the task for a stopped instance' {
+        Start-GreenroomSession -Name probe -TimeoutSeconds 5 -ErrorAction SilentlyContinue
+        Should -Invoke -ModuleName Greenroom Start-ScheduledTask -Times 1 -Exactly `
+            -ParameterFilter { $TaskName -eq 'greenroom-probe' }
+    }
+
+    It 'returns the instance once its session appears' {
+        # Stopped at the check, up by the first poll.
+        $script:GrStartCalls = 0
+        Mock -ModuleName Greenroom Get-GreenroomInstance {
+            $script:GrStartCalls++
+            if ($script:GrStartCalls -gt 1) {
+                [PSCustomObject]@{ PSTypeName = 'Greenroom.Instance'; Instance = 'probe'; ClaudePid = 77; Opaque = $false }
+            }
+        }
+        (Start-GreenroomSession -Name probe).ClaudePid | Should -Be 77
+    }
+
+    It 'LEAVES A RUNNING INSTANCE ALONE -- the difference from Restart' {
+        # Restart kills the watchdog, the session and the launcher before starting. Reached
+        # for as "make sure it is up", that restarts something that was fine.
+        Mock -ModuleName Greenroom Get-GreenroomInstance {
+            [PSCustomObject]@{ PSTypeName = 'Greenroom.Instance'; Instance = 'probe'; ClaudePid = 42; Opaque = $false }
+        }
+        (Start-GreenroomSession -Name probe).ClaudePid | Should -Be 42
+        Should -Invoke -ModuleName Greenroom Start-ScheduledTask -Times 0
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 0
+    }
+
+    It 'never kills anything, even when it does start' {
+        Start-GreenroomSession -Name probe -TimeoutSeconds 5 -ErrorAction SilentlyContinue
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 0
+    }
+
+    It 'refuses when the instance has no scheduled task' {
+        { Start-GreenroomSession -Name nope -ErrorAction Stop } | Should -Throw
+        Should -Invoke -ModuleName Greenroom Start-ScheduledTask -Times 0
+    }
+
+    It 'starts nothing under -WhatIf' {
+        Start-GreenroomSession -Name probe -WhatIf
+        Should -Invoke -ModuleName Greenroom Start-ScheduledTask -Times 0
+    }
+
+    It 'errors when the session never appears' {
+        { Start-GreenroomSession -Name probe -TimeoutSeconds 5 -ErrorAction Stop } | Should -Throw
+    }
+
+    It 'warns rather than errors when an elevated instance cannot be confirmed' {
+        # Starting needs no elevation; confirming does. Failing here would report a check
+        # that could not run as a start that did not happen.
+        Mock -ModuleName Greenroom Test-InstanceElevated { $true }
+        Mock -ModuleName Greenroom Test-SelfElevated { $false }
+        { Start-GreenroomSession -Name probe -TimeoutSeconds 5 -ErrorAction Stop -WarningAction SilentlyContinue } |
+            Should -Not -Throw
+        Should -Invoke -ModuleName Greenroom Start-ScheduledTask -Times 1 -Exactly
+    }
+
+    It 'warns when the instance would come up on older assets' {
+        Mock -ModuleName Greenroom Get-InstanceAssetVersion { '0.0.1' }
+        Start-GreenroomSession -Name probe -TimeoutSeconds 5 -ErrorAction SilentlyContinue `
+            -WarningVariable w -WarningAction SilentlyContinue
+        ($w -join ' ') | Should -Match '0\.0\.1'
+    }
+
+    It 'with no name, uses the only registered instance' {
+        Start-GreenroomSession -TimeoutSeconds 5 -ErrorAction SilentlyContinue
+        Should -Invoke -ModuleName Greenroom Start-ScheduledTask -Times 1 -Exactly `
+            -ParameterFilter { $TaskName -eq 'greenroom-probe' }
+    }
+
+    It 'with no name and several registered, refuses to guess' {
+        Mock -ModuleName Greenroom Get-ScheduledTask {
+            [PSCustomObject]@{ TaskName = 'greenroom-a' }; [PSCustomObject]@{ TaskName = 'greenroom-b' }
+        }
+        { Start-GreenroomSession -ErrorAction Stop } | Should -Throw
+        Should -Invoke -ModuleName Greenroom Start-ScheduledTask -Times 0
+    }
+
+    It 'starts every registered instance a wildcard matches' {
+        Mock -ModuleName Greenroom Get-ScheduledTask {
+            [PSCustomObject]@{ TaskName = 'greenroom-a' }; [PSCustomObject]@{ TaskName = 'greenroom-b' }
+        }
+        Start-GreenroomSession -Name '*' -TimeoutSeconds 5 -ErrorAction SilentlyContinue
+        Should -Invoke -ModuleName Greenroom Start-ScheduledTask -Times 2 -Exactly
+    }
+
+    It 'takes names captured before a stop, from the pipeline' {
+        # The upgrade procedure: capture while running, stop, upgrade, pipe the names back.
+        Mock -ModuleName Greenroom Get-ScheduledTask {
+            [PSCustomObject]@{ TaskName = 'greenroom-a' }; [PSCustomObject]@{ TaskName = 'greenroom-b' }
+        }
+        'a', 'b' | Start-GreenroomSession -TimeoutSeconds 5 -ErrorAction SilentlyContinue
+        Should -Invoke -ModuleName Greenroom Start-ScheduledTask -Times 2 -Exactly
+    }
+}

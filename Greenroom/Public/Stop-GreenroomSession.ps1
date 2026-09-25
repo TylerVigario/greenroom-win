@@ -27,7 +27,8 @@
 
   The task is stopped before any of it, so its trigger cannot start a replacement
   watchdog part-way through. That does NOT disable the task -- a stopped instance comes
-  back at the next logon, which is the intended behaviour for a supervised thing.
+  back at the next logon, or when Start-GreenroomSession is run, which is the intended
+  behaviour for a supervised thing.
   Uninstall-GreenroomInstance is how you make it stay away.
 
   Everything is driven from the instance NAME, its scheduled task and config.json,
@@ -64,12 +65,15 @@
   Shows what would be stopped without touching anything.
 
 .EXAMPLE
-  Get-GreenroomInstance | Stop-GreenroomSession
+  $running = (Get-GreenroomInstance).Instance
+  $running | Stop-GreenroomSession
   winget upgrade --id Anthropic.ClaudeCode
-  Get-GreenroomInstance | Restart-GreenroomSession
-  Taking every instance down to upgrade the CLI they all hold open. Note that a Claude
-  Code session you are typing in holds the same binary, so this frees it only if the
-  shell running these commands is not itself inside one.
+  $running | Start-GreenroomSession
+  Taking every instance down to upgrade the CLI they all hold open. Capture the names
+  FIRST: Get-GreenroomInstance lists running sessions only, so once they are stopped it
+  returns nothing. Note that a Claude Code session you are typing in holds the same
+  binary, so this frees it only if the shell running these commands is not itself inside
+  one.
 #>
 function Stop-GreenroomSession {
     [CmdletBinding(SupportsShouldProcess)]
