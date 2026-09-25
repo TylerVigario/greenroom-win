@@ -33,7 +33,9 @@
   registered, that one is used. Accepts pipeline input, including Greenroom.Instance objects.
 
 .PARAMETER NoElevate
-  Do not escalate when the instance runs elevated. Fails instead.
+  Do not escalate when the instance runs elevated. Fails instead. Without it, an elevated
+  instance is handed to an elevated copy through UAC -- ONE prompt for every elevated
+  instance a pattern or pipeline matched, raised after the others have been restarted.
 
 .PARAMETER TimeoutSeconds
   How long to wait for the replacement session to appear. Default 45.
@@ -68,6 +70,13 @@ function Restart-GreenroomSession {
         [int]$TimeoutSeconds = 45
     )
 
+    begin {
+        # Elevated instances this shell cannot act on, escalated together in `end` so that
+        # one UAC prompt covers all of them. The elevated copy restarts them in the same
+        # one-at-a-time order, so deferring them does not reintroduce the logon race.
+        $deferred = [System.Collections.Generic.List[string]]::new()
+    }
+
     process {
         # ONE INVOCATION, looping, as Start-GreenroomSession does -- see the note in
         # Stop-GreenroomSession for what the per-instance fan-out it replaced got wrong.
@@ -90,11 +99,9 @@ function Restart-GreenroomSession {
             # shell the operator typed in.
             if (-not $PSCmdlet.ShouldProcess($n, 'Restart-GreenroomSession')) { continue }
 
-            # A declined UAC prompt THROWS; caught so it cannot abandon the instances after
-            # this one, and reported through this command so -ErrorAction still decides.
-            try { $proceed = Assert-CanActOnInstance -Name $n -Command 'Restart-GreenroomSession' -NoElevate:$NoElevate }
-            catch { $PSCmdlet.WriteError($_); continue }
-            if (-not $proceed) { continue }
+            if (-not (Assert-CanActOnInstance -Name $n -Command 'Restart-GreenroomSession' -NoElevate:$NoElevate -Defer $deferred)) {
+                continue
+            }
 
             # Said BEFORE anything is stopped, while it is still actionable. A restart re-runs
             # the task and the task names the VERSIONED asset path, so with a new module merely
@@ -143,5 +150,9 @@ function Restart-GreenroomSession {
                 "'$n' did not come up within $TimeoutSeconds s. Check: Get-Content " +
                 "`"$(Join-Path (Get-GreenroomStateRoot) "$n\watchdog.log")`" -Tail 20")
         }
+    }
+
+    end {
+        if ($deferred.Count) { Invoke-DeferredElevation -Command 'Restart-GreenroomSession' -Name $deferred -Cmdlet $PSCmdlet }
     }
 }

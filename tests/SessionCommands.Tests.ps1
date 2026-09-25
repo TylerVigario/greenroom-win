@@ -131,6 +131,21 @@ Describe 'Assert-CanActOnInstance' {
         Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 0
     }
 
+    It 'with -Defer, queues the name instead of escalating -- even into an EMPTY list' {
+        # An empty list is falsy, so a truthiness check would escalate the first name
+        # immediately and defer only the ones after it.
+        $r = InModuleScope Greenroom {
+            $q = [System.Collections.Generic.List[string]]::new()
+            [PSCustomObject]@{
+                Result = Assert-CanActOnInstance -Name probe -Command 'Stop-GreenroomSession' -Defer $q
+                Queued = @($q)
+            }
+        }
+        $r.Result | Should -BeFalse -Because 'the caller must not act on it locally'
+        $r.Queued | Should -Be @('probe')
+        Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 0
+    }
+
     It 'does not escalate at all when the instance is not elevated' {
         Mock -ModuleName Greenroom Test-InstanceElevated { $false }
         $r = InModuleScope Greenroom { Assert-CanActOnInstance -Name probe -Command 'Show-GreenroomSession' }
@@ -686,42 +701,6 @@ Describe 'Fan-out and name resolution' {
         Mock -ModuleName Greenroom Get-GreenroomInstance { }
     }
 
-    It 'a declined UAC prompt for one instance does not abandon the rest (Stop)' {
-        # Invoke-ElevatedSelf THROWS when the prompt is dismissed. Under the fan-out that
-        # throw unwound the whole command, so b and c were never stopped.
-        Mock -ModuleName Greenroom Assert-CanActOnInstance {
-            if ($Name -eq 'a') { throw "elevation declined or failed -- 'a' was not changed" }
-            $true
-        }
-        $r = @(Stop-GreenroomSession -Name '*' -SettleSeconds 0 -ErrorAction SilentlyContinue -ErrorVariable e)
-        $r.Instance | Should -Be @('b', 'c')
-        $e.Count    | Should -BeGreaterThan 0
-    }
-
-    It 'a declined UAC prompt for one instance does not abandon the rest (Restart)' {
-        Mock -ModuleName Greenroom Assert-CanActOnInstance {
-            if ($Name -eq 'a') { throw "elevation declined or failed -- 'a' was not changed" }
-            $true
-        }
-        Mock -ModuleName Greenroom Get-GreenroomInstance {
-            [PSCustomObject]@{ PSTypeName = 'Greenroom.Instance'; Instance = $Name; ClaudePid = 1; Opaque = $false }
-        }
-        $r = @(Restart-GreenroomSession -Name '*' -ErrorAction SilentlyContinue)
-        $r.Instance | Should -Be @('b', 'c')
-        Should -Invoke -ModuleName Greenroom Start-ScheduledTask -Times 2 -Exactly
-    }
-
-    It '-ErrorAction Stop still ends the run at the first refusal' {
-        # Catching the throw must not swallow it: WriteError honours the caller's
-        # -ErrorAction, so Stop still means stop.
-        Mock -ModuleName Greenroom Assert-CanActOnInstance {
-            if ($Name -eq 'a') { throw 'declined' }
-            $true
-        }
-        { Stop-GreenroomSession -Name '*' -SettleSeconds 0 -ErrorAction Stop } | Should -Throw
-        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 0
-    }
-
     It 'Stop settles ONCE across every instance, not once per instance' {
         # One pass of SettleSeconds * 2 polls. Per-instance settling slept 3x as long here.
         Stop-GreenroomSession -Name '*' -SettleSeconds 1 | Out-Null
@@ -768,5 +747,186 @@ Describe 'Fan-out and name resolution' {
         InModuleScope Greenroom { Get-RegisteredInstanceName } | Out-Null
         Should -Invoke -ModuleName Greenroom Get-ScheduledTask -Times 1 -Exactly `
             -ParameterFilter { $TaskPath -eq '\' }
+    }
+}
+
+Describe 'One UAC prompt for many elevated instances' {
+
+    # Escalation used to happen per instance, as each came up in the loop, so a pattern
+    # matching three elevated instances asked three times for one decision. Now they are
+    # deferred and escalated together in `end`. Assert-CanActOnInstance is deliberately
+    # NOT mocked here: the deferral lives in it, and mocking it is how this went untested.
+
+    BeforeEach {
+        Mock -ModuleName Greenroom Get-ScheduledTask {
+            'greenroom-a', 'greenroom-b', 'greenroom-c' | Where-Object { $_ -like $TaskName } |
+                ForEach-Object { [PSCustomObject]@{ TaskName = $_ } }
+        }
+        Mock -ModuleName Greenroom Test-SelfIsInstance { $false }
+        Mock -ModuleName Greenroom Test-InstanceElevated { $Name -in 'a', 'c' }
+        Mock -ModuleName Greenroom Test-SelfElevated { $false }
+        Mock -ModuleName Greenroom Invoke-ElevatedSelf { 0 }
+        Mock -ModuleName Greenroom Stop-VerifiedProcess { 1 }
+        Mock -ModuleName Greenroom Stop-ScheduledTask { }
+        Mock -ModuleName Greenroom Start-ScheduledTask { }
+        Mock -ModuleName Greenroom Start-Sleep { }
+        Mock -ModuleName Greenroom Get-InstanceAssetVersion { $null }
+        Mock -ModuleName Greenroom Get-GreenroomInstance {
+            [PSCustomObject]@{ PSTypeName = 'Greenroom.Instance'; Instance = $Name; ClaudePid = 1; Opaque = $false }
+        }
+    }
+
+    It 'Stop: one escalation carries every elevated match, and the rest are stopped here' {
+        Mock -ModuleName Greenroom Get-GreenroomInstance { }
+        $r = @(Stop-GreenroomSession -Name '*' -SettleSeconds 0 -WarningAction SilentlyContinue)
+        Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 1 -Exactly -ParameterFilter {
+            ($Name -join ',') -eq 'a,c' -and $Command -eq 'Stop-GreenroomSession'
+        }
+        $r.Instance | Should -Be @('b')
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 3 -Exactly
+    }
+
+    It 'Restart: one escalation carries every elevated match, and the rest are restarted here' {
+        $r = @(Restart-GreenroomSession -Name '*' -WarningAction SilentlyContinue)
+        Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 1 -Exactly -ParameterFilter {
+            ($Name -join ',') -eq 'a,c' -and $Command -eq 'Restart-GreenroomSession'
+        }
+        $r.Instance | Should -Be @('b')
+        Should -Invoke -ModuleName Greenroom Start-ScheduledTask -Times 1 -Exactly
+    }
+
+    It 'names piped in one at a time still share one prompt' {
+        # Each piped name is its own `process` call, so deferring within the loop alone
+        # would still have prompted once per name. The list lives across calls, in `begin`.
+        Mock -ModuleName Greenroom Get-GreenroomInstance { }
+        'a', 'b', 'c' | Stop-GreenroomSession -SettleSeconds 0 -WarningAction SilentlyContinue | Out-Null
+        Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 1 -Exactly -ParameterFilter {
+            ($Name -join ',') -eq 'a,c'
+        }
+    }
+
+    It 'a single elevated instance escalates on its own, as before' {
+        Mock -ModuleName Greenroom Get-GreenroomInstance { }
+        Stop-GreenroomSession -Name 'a' -SettleSeconds 0 | Out-Null
+        Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 1 -Exactly -ParameterFilter {
+            ($Name -join ',') -eq 'a'
+        }
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 0
+    }
+
+    # Declines are counted on the ERROR STREAM, not with -ErrorVariable. MEASURED: a throw
+    # that is caught still lands in the caller's -ErrorVariable and in $Error, so the
+    # variable also holds what Invoke-ElevatedSelf threw and Start-Process raised inside it
+    # -- none of which the operator sees. The stream is what reaches the console.
+    It 'a declined prompt is one error, and does not undo or skip the instances done here (Stop)' {
+        # Invoke-ElevatedSelf THROWS when the prompt is dismissed.
+        Mock -ModuleName Greenroom Invoke-ElevatedSelf { throw "elevation declined or failed -- 'a', 'c' were not changed" }
+        Mock -ModuleName Greenroom Get-GreenroomInstance { }
+        $out = @(Stop-GreenroomSession -Name '*' -SettleSeconds 0 -WarningAction SilentlyContinue -ErrorAction Continue 2>&1)
+        $err = @($out | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] })
+        @($out | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }).Instance | Should -Be @('b')
+        $err.Count                    | Should -Be 1
+        $err[0].FullyQualifiedErrorId | Should -Be 'ElevationDeclined,Stop-GreenroomSession'
+        "$($err[0])"                  | Should -Match 'declined'
+    }
+
+    It 'a declined prompt is one error, and does not undo or skip the instances done here (Restart)' {
+        Mock -ModuleName Greenroom Invoke-ElevatedSelf { throw 'declined' }
+        $out = @(Restart-GreenroomSession -Name '*' -WarningAction SilentlyContinue -ErrorAction Continue 2>&1)
+        $err = @($out | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] })
+        @($out | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }).Instance | Should -Be @('b')
+        $err.Count                    | Should -Be 1
+        $err[0].FullyQualifiedErrorId | Should -Be 'ElevationDeclined,Restart-GreenroomSession'
+    }
+
+    It 'a failed elevated run is reported as the command, naming every instance it carried' {
+        # Only the exit code crosses back, so which one failed cannot be known here.
+        Mock -ModuleName Greenroom Invoke-ElevatedSelf { 1 }
+        Mock -ModuleName Greenroom Get-GreenroomInstance { }
+        Stop-GreenroomSession -Name '*' -SettleSeconds 0 -WarningAction SilentlyContinue -ErrorAction SilentlyContinue -ErrorVariable e | Out-Null
+        $e.Count                    | Should -Be 1
+        $e[0].FullyQualifiedErrorId | Should -Be 'ElevatedRunFailed,Stop-GreenroomSession'
+        "$($e[0])"                  | Should -Match "'a', 'c'"
+    }
+
+    It '-NoElevate refuses each elevated instance and escalates nothing' {
+        Mock -ModuleName Greenroom Get-GreenroomInstance { }
+        $r = @(Stop-GreenroomSession -Name '*' -NoElevate -SettleSeconds 0 -ErrorAction SilentlyContinue -ErrorVariable e)
+        Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 0
+        $r.Instance | Should -Be @('b')
+        $e.Count    | Should -Be 2
+    }
+
+    It '-ErrorAction Stop still ends the run at the first refusal' {
+        { Stop-GreenroomSession -Name '*' -NoElevate -SettleSeconds 0 -ErrorAction Stop } | Should -Throw
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 0
+        Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 0
+    }
+
+    It '-WhatIf escalates nothing' {
+        Stop-GreenroomSession -Name '*' -WhatIf
+        Restart-GreenroomSession -Name '*' -WhatIf
+        Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 0
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 0
+    }
+}
+
+Describe 'The batched elevated command, run for real' {
+
+    # The string Invoke-ElevatedSelf builds is executed in a real child pwsh -- without
+    # RunAs, the one part a test cannot click through -- against a stand-in module at the
+    # path it imports from. Asserting on the string's TEXT would pass a command that does
+    # not parse, or one that stops at the first failing name.
+
+    BeforeAll {
+        $script:Stub = Join-Path $TestDrive 'Greenroom'
+        New-Item -ItemType Directory -Force $script:Stub | Out-Null
+        Set-Content -Path (Join-Path $script:Stub 'Greenroom.psm1') -Value @'
+function Stop-GreenroomSession {
+    [CmdletBinding(SupportsShouldProcess)]
+    param([Parameter(ValueFromPipeline)][string]$Name, [switch]$NoElevate)
+    process {
+        if (-not $NoElevate) { throw 'the elevated copy must not escalate again' }
+        if ($Name -eq 'bad') { Write-Error "failed for $Name"; return }
+        Add-Content -Path (Join-Path $PSScriptRoot 'acted.txt') -Value $Name
+    }
+}
+'@
+        New-ModuleManifest -Path (Join-Path $script:Stub 'Greenroom.psd1') -RootModule 'Greenroom.psm1' `
+            -FunctionsToExport 'Stop-GreenroomSession' -ModuleVersion '0.0.1'
+
+        # Build the command with the stub as the module root, then put the real root back.
+        # The mock body runs in this file's scope, so $script: here is this file's.
+        Mock -ModuleName Greenroom Start-Process { $script:Inner = $ArgumentList[-1]; [PSCustomObject]@{ ExitCode = 0 } }
+        InModuleScope Greenroom -Parameters @{ Stub = $script:Stub } {
+            param($Stub)
+            $saved = $script:GreenroomModuleRoot
+            $script:GreenroomModuleRoot = $Stub
+            try {
+                Invoke-ElevatedSelf -Command 'Stop-GreenroomSession' -Name 'one', 'bad', 'two' -WarningAction SilentlyContinue | Out-Null
+            }
+            finally { $script:GreenroomModuleRoot = $saved }
+        }
+    }
+
+    It 'built a command to run' { $script:Inner | Should -Match 'Stop-GreenroomSession' }
+
+    BeforeEach { Remove-Item (Join-Path $script:Stub 'acted.txt') -ErrorAction Ignore }
+
+    It 'acts on every name in one process, past a failing one, and exits 1' {
+        # The child writes the failing name's error to stderr, on purpose. Under Windows
+        # PowerShell 5.1 a native command's stderr becomes an ERROR RECORD even when
+        # redirected to $null, and ci/check.ps1 runs with ErrorActionPreference Stop, so
+        # that expected line ended the test. MEASURED: CI's 5.1 leg failed here; pwsh 7 did not.
+        $ErrorActionPreference = 'Continue'
+        pwsh -NoLogo -NoProfile -Command $script:Inner 2>$null | Out-Null
+        $LASTEXITCODE | Should -Be 1
+        @(Get-Content (Join-Path $script:Stub 'acted.txt')) | Should -Be @('one', 'two')
+    }
+
+    It 'exits 0 when every name succeeds' {
+        pwsh -NoLogo -NoProfile -Command $script:Inner.Replace("'bad',", '') | Out-Null
+        $LASTEXITCODE | Should -Be 0
+        @(Get-Content (Join-Path $script:Stub 'acted.txt')) | Should -Be @('one', 'two')
     }
 }
