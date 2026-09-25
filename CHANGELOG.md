@@ -9,6 +9,17 @@ it. 0.1.0 at the bottom is hand-written and reads "Initial release." because a f
 release has no changes to list — there is nothing it changed from.
 
 - - -
+## [v0.5.0](https://github.com/TylerVigario/greenroom-win/compare/1ff33c665e74b2feb254d905941acf41bce98cc3..v0.5.0) - 2026-09-25
+#### Features
+- (**session**) accept wildcards on Stop- and Restart-GreenroomSession (#54) - ([9e5fd24](https://github.com/TylerVigario/greenroom-win/commit/9e5fd2470304fcd5daebafd3f16fb8d993caa908)) - Tyler Vigario, Claude Opus 5.5
+- (**session**) start a stopped instance without restarting a running one (#53) - ([40e2069](https://github.com/TylerVigario/greenroom-win/commit/40e206964e14d53420ccf1112224d6e39a33a6c1)) - Tyler Vigario, Claude Opus 5.5
+#### Bug Fixes
+- (**install**) resolve claude.exe by PATH order, not by install method (#52) - ([1ff33c6](https://github.com/TylerVigario/greenroom-win/commit/1ff33c665e74b2feb254d905941acf41bce98cc3)) - Tyler Vigario, Claude Opus 5
+- (**session**) escalate every elevated instance under one UAC prompt (#56) - ([6cf3b1e](https://github.com/TylerVigario/greenroom-win/commit/6cf3b1edf56b6f283bf2523a360284e063c0794b)) - Tyler Vigario, Claude Opus 5.5
+- (**session**) loop wildcard matches in one invocation, and report as the command (#55) - ([ce8323c](https://github.com/TylerVigario/greenroom-win/commit/ce8323c1c602bd91b06e1062a70b9610d1cd3214)) - Tyler Vigario, Claude Opus 5.5
+
+- - -
+
 ## [v0.4.0](https://github.com/TylerVigario/greenroom-win/compare/cc989af7bbde5a0c96af2f108d0212f20b61f1b8..v0.4.0) - 2026-09-25
 #### Features
 - (**session**) stop an instance and leave it stopped (#45) - ([e1e0a9b](https://github.com/TylerVigario/greenroom-win/commit/e1e0a9b14f65087cfbe9a95284e29a80c291d9f3)) - Tyler Vigario, Claude Opus 5
