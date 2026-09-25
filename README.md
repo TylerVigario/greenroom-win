@@ -89,7 +89,8 @@ Uninstall-GreenroomInstance -Name desktop-admin
 ```
 
 The name can be omitted **when exactly one instance is installed** — for the visibility
-commands, `Restart-`, `Start-` and `Stop-`. `Start-` also takes wildcards: `Start-GreenroomSession *`. The other two differ, deliberately: `Update-GreenroomInstance`
+commands, `Restart-`, `Start-` and `Stop-`. `Start-`, `Stop-` and `Restart-` also take wildcards, matched against registered instances:
+`Stop-GreenroomSession *`, `Restart-GreenroomSession render-*`. The other two differ, deliberately: `Update-GreenroomInstance`
 with no name updates **every** instance whose assets are behind, and `Uninstall-` always
 requires `-Name`, because removing the wrong instance is not a mistake worth making
 convenient.
