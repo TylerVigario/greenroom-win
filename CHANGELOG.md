@@ -9,6 +9,12 @@ it. 0.1.0 at the bottom is hand-written and reads "Initial release." because a f
 release has no changes to list — there is nothing it changed from.
 
 - - -
+## [v0.6.0](https://github.com/TylerVigario/greenroom-win/compare/b87739cc26bea5ff428bce20f5ddf057f0ef767c..v0.6.0) - 2026-09-25
+#### Features
+- (**session**) carry elevated output back, and show which version runs (#57) - ([b87739c](https://github.com/TylerVigario/greenroom-win/commit/b87739cc26bea5ff428bce20f5ddf057f0ef767c)) - Tyler Vigario, Claude Opus 5.5
+
+- - -
+
 ## [v0.5.0](https://github.com/TylerVigario/greenroom-win/compare/1ff33c665e74b2feb254d905941acf41bce98cc3..v0.5.0) - 2026-09-25
 #### Features
 - (**session**) accept wildcards on Stop- and Restart-GreenroomSession (#54) - ([9e5fd24](https://github.com/TylerVigario/greenroom-win/commit/9e5fd2470304fcd5daebafd3f16fb8d993caa908)) - Tyler Vigario, Claude Opus 5.5

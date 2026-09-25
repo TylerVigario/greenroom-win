@@ -12,7 +12,7 @@
 RootModule = 'Greenroom.psm1'
 
 # Version number of this module.
-ModuleVersion = '0.5.0'
+ModuleVersion = '0.6.0'
 
 # Supported PSEditions
 CompatiblePSEditions = 'Core', 'Desktop'
@@ -112,14 +112,9 @@ PrivateData = @{
 
         # ReleaseNotes of this module
         ReleaseNotes = '#### Features
-- session: accept wildcards on Stop- and Restart-GreenroomSession (#54)
-- session: start a stopped instance without restarting a running one (#53)
-#### Bug Fixes
-- install: resolve claude.exe by PATH order, not by install method (#52)
-- session: escalate every elevated instance under one UAC prompt (#56)
-- session: loop wildcard matches in one invocation, and report as the command (#55)
+- session: carry elevated output back, and show which version runs (#57)
 
-Full changelog: https://github.com/TylerVigario/greenroom-win/releases/tag/v0.5.0'
+Full changelog: https://github.com/TylerVigario/greenroom-win/releases/tag/v0.6.0'
 
         # Prerelease string of this module
         # Prerelease = ''
