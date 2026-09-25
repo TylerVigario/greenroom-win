@@ -1,0 +1,52 @@
+# Dependabot version updates.
+#
+# Dependabot ALERTS and SECURITY updates are repository settings and are already on;
+# they only react to a published advisory. This file is the other half: it watches for
+# new versions when nothing is wrong, which is the half that keeps a pin from quietly
+# aging into one.
+#
+# ONLY github-actions. There is no other ecosystem here -- the module is PowerShell, its
+# two check dependencies (Pester, PSScriptAnalyzer) are MinimumVersion floors resolved on
+# the runner rather than pinned artifacts, and cocogitto is fetched as a pinned release
+# binary inside a workflow step, which no ecosystem models. Those stay a human decision.
+#
+# THE PREFIX IS LOAD-BEARING, not cosmetic. Merges here are squashes, so the pull request
+# title becomes the commit message on main, and `pr-title` lints it with `cog verify`.
+# Dependabot's own title is "Bump actions/checkout from 7.0.0 to 7.0.1" -- not a
+# conventional commit, so without a prefix every pull request it opens fails a required
+# check and can never merge. With it the title reads "ci: bump actions/checkout from
+# 7.0.0 to 7.0.1", which passes. `ci` because updating the pins changes the build and
+# nothing shipped: `feat` and `fix` are the two types that carry meaning here, and an
+# action bump is neither.
+#
+# TWO ENTRIES, because one directory does not cover both places an action is referenced.
+# `/` finds the workflows. The composite action in .github/actions/setup has its own
+# `uses:` -- extractions/setup-just -- and is only scanned when its directory is named.
+# Miss that and the update runs green while silently covering less than it appears to.
+
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    # One pull request rather than one per action. Three actions moving separately is
+    # three titles, three check runs and three merges for what is one decision.
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: /.github/actions/setup
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns:
+          - "*"
