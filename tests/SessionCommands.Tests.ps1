@@ -652,3 +652,121 @@ Describe 'Wildcards on Stop- and Restart-GreenroomSession' {
         Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 0
     }
 }
+
+Describe 'Fan-out and name resolution' {
+
+    # Regressions for a review of the wildcard work in #54, which fanned a pattern out into
+    # one nested invocation per instance. Each case here was confirmed against that version
+    # before it was fixed.
+
+    BeforeEach {
+        Mock -ModuleName Greenroom Get-ScheduledTask {
+            $hit = @('greenroom-a', 'greenroom-b', 'greenroom-c' | Where-Object { $_ -like $TaskName })
+            # Like the real cmdlet: an EXACT name that matches nothing raises an error. A
+            # mock that stayed silent is how a stray error record went unnoticed.
+            if (-not $hit -and -not [WildcardPattern]::ContainsWildcardCharacters($TaskName)) {
+                # The mock body runs in the TEST's scope, so -ErrorAction passed by the code
+                # does not reach a bare Write-Error here. Hand it on explicitly, or the mock
+                # records errors the real cmdlet would not. MEASURED on the real cmdlet:
+                # SilentlyContinue leaves one record, Ignore leaves none.
+                $ea = if ($PesterBoundParameters.ContainsKey('ErrorAction')) { $PesterBoundParameters['ErrorAction'] } else { 'Continue' }
+                Write-Error -Message "No MSFT_ScheduledTask objects found with property 'TaskName' equal to '$TaskName'." -ErrorAction $ea
+            }
+            $hit | ForEach-Object { [PSCustomObject]@{ TaskName = $_ } }
+        }
+        Mock -ModuleName Greenroom Test-SelfIsInstance { $false }
+        Mock -ModuleName Greenroom Assert-CanActOnInstance { $true }
+        Mock -ModuleName Greenroom Stop-VerifiedProcess { 1 }
+        Mock -ModuleName Greenroom Stop-ScheduledTask { }
+        Mock -ModuleName Greenroom Start-ScheduledTask { }
+        Mock -ModuleName Greenroom Start-Sleep { }
+        Mock -ModuleName Greenroom Test-InstanceElevated { $false }
+        Mock -ModuleName Greenroom Test-SelfElevated { $false }
+        Mock -ModuleName Greenroom Get-InstanceAssetVersion { $null }
+        Mock -ModuleName Greenroom Get-GreenroomInstance { }
+    }
+
+    It 'a declined UAC prompt for one instance does not abandon the rest (Stop)' {
+        # Invoke-ElevatedSelf THROWS when the prompt is dismissed. Under the fan-out that
+        # throw unwound the whole command, so b and c were never stopped.
+        Mock -ModuleName Greenroom Assert-CanActOnInstance {
+            if ($Name -eq 'a') { throw "elevation declined or failed -- 'a' was not changed" }
+            $true
+        }
+        $r = @(Stop-GreenroomSession -Name '*' -SettleSeconds 0 -ErrorAction SilentlyContinue -ErrorVariable e)
+        $r.Instance | Should -Be @('b', 'c')
+        $e.Count    | Should -BeGreaterThan 0
+    }
+
+    It 'a declined UAC prompt for one instance does not abandon the rest (Restart)' {
+        Mock -ModuleName Greenroom Assert-CanActOnInstance {
+            if ($Name -eq 'a') { throw "elevation declined or failed -- 'a' was not changed" }
+            $true
+        }
+        Mock -ModuleName Greenroom Get-GreenroomInstance {
+            [PSCustomObject]@{ PSTypeName = 'Greenroom.Instance'; Instance = $Name; ClaudePid = 1; Opaque = $false }
+        }
+        $r = @(Restart-GreenroomSession -Name '*' -ErrorAction SilentlyContinue)
+        $r.Instance | Should -Be @('b', 'c')
+        Should -Invoke -ModuleName Greenroom Start-ScheduledTask -Times 2 -Exactly
+    }
+
+    It '-ErrorAction Stop still ends the run at the first refusal' {
+        # Catching the throw must not swallow it: WriteError honours the caller's
+        # -ErrorAction, so Stop still means stop.
+        Mock -ModuleName Greenroom Assert-CanActOnInstance {
+            if ($Name -eq 'a') { throw 'declined' }
+            $true
+        }
+        { Stop-GreenroomSession -Name '*' -SettleSeconds 0 -ErrorAction Stop } | Should -Throw
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 0
+    }
+
+    It 'Stop settles ONCE across every instance, not once per instance' {
+        # One pass of SettleSeconds * 2 polls. Per-instance settling slept 3x as long here.
+        Stop-GreenroomSession -Name '*' -SettleSeconds 1 | Out-Null
+        Should -Invoke -ModuleName Greenroom Start-Sleep -Times 2 -Exactly
+    }
+
+    It 'resolves a pattern with one task lookup, not one per instance' {
+        Stop-GreenroomSession -Name '*' -SettleSeconds 0 | Out-Null
+        Should -Invoke -ModuleName Greenroom Get-ScheduledTask -Times 1 -Exactly
+    }
+
+    It 'reports an unknown name as the command that was typed, and ONLY that' {
+        # The lookup's own "not found" must leave no record ahead of it: SilentlyContinue
+        # hid that error from the console but still put it first in -ErrorVariable.
+        Stop-GreenroomSession -Name 'nope' -ErrorAction SilentlyContinue -ErrorVariable e
+        $e.Count                    | Should -Be 1
+        $e[0].FullyQualifiedErrorId | Should -Be 'InstanceNotRegistered,Stop-GreenroomSession'
+    }
+
+    It 'reports a missing name as the command that was typed' {
+        Restart-GreenroomSession -ErrorAction SilentlyContinue -ErrorVariable e
+        $e[0].FullyQualifiedErrorId | Should -Be 'InstanceNameRequired,Restart-GreenroomSession'
+    }
+
+    It 'with ONE registered instance and no name, resolves the whole name, not its first letter' {
+        # A one-element array returned from a function unrolls to a bare string, and
+        # indexing a string returns a character: this once started 'greenroom-p'.
+        Mock -ModuleName Greenroom Get-ScheduledTask {
+            if ('greenroom-probe' -like $TaskName) { [PSCustomObject]@{ TaskName = 'greenroom-probe' } }
+        }
+        Stop-GreenroomSession -SettleSeconds 0 | Out-Null
+        Should -Invoke -ModuleName Greenroom Stop-ScheduledTask -Times 1 -Exactly `
+            -ParameterFilter { $TaskName -eq 'greenroom-probe' }
+    }
+
+    It 'lists each registered instance once, even if a same-named task sits in another folder' {
+        Mock -ModuleName Greenroom Get-ScheduledTask {
+            [PSCustomObject]@{ TaskName = 'greenroom-a' }; [PSCustomObject]@{ TaskName = 'greenroom-a' }
+        }
+        @(InModuleScope Greenroom { Get-RegisteredInstanceName }) | Should -Be @('a')
+    }
+
+    It 'reads only the root task folder, where Register-GreenroomTask puts them' {
+        InModuleScope Greenroom { Get-RegisteredInstanceName } | Out-Null
+        Should -Invoke -ModuleName Greenroom Get-ScheduledTask -Times 1 -Exactly `
+            -ParameterFilter { $TaskPath -eq '\' }
+    }
+}

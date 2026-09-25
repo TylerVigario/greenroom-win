@@ -69,84 +69,79 @@ function Restart-GreenroomSession {
     )
 
     process {
-        # A pattern or an omitted name fans out into one call per resolved instance, so the
-        # single-instance path below -- self guard, ShouldProcess, escalation -- runs
-        # unchanged for each. Every other bound parameter, common ones included, is
-        # forwarded; -WhatIf and -Confirm also travel on their preference variables, which a
-        # called function inherits. Rewriting the body as a loop instead would have turned
-        # each of its early `return`s into a silent abandonment of the remaining instances.
-        $names = @(Resolve-InstanceName -Name $Name)
-        if ($names.Count -eq 0) { return }
-        if ($names.Count -gt 1 -or $names[0] -ne $Name) {
-            $fwd = @{} + $PSBoundParameters
-            [void]$fwd.Remove('Name')
-            foreach ($n in $names) { Restart-GreenroomSession -Name $n @fwd }
-            return
+        # ONE INVOCATION, looping, as Start-GreenroomSession does -- see the note in
+        # Stop-GreenroomSession for what the per-instance fan-out it replaced got wrong.
+        #
+        # Deliberately SEQUENTIAL: each instance is confirmed up before the next is touched.
+        # Instances are staggered at logon so they do not race each other starting, and
+        # restarting them all at once would bring that race straight back.
+        foreach ($n in @(Resolve-InstanceName -Name $Name -Cmdlet $PSCmdlet)) {
+            if (Test-SelfIsInstance -Name $n) {
+                Write-Error -Category InvalidOperation -Message (
+                    "'$n' is the session this shell is running inside. Restarting it from here would kill " +
+                    'this process partway through, before the task is started again, leaving the instance down ' +
+                    "rather than restarted. Run it from a shell outside the session.")
+                continue
+            }
+
+            # Gated before escalation: a new elevated process starts with its own
+            # $WhatIfPreference and $ConfirmPreference, so -WhatIf must stop here rather than
+            # be re-decided against defaults over there, and -Confirm must prompt in the
+            # shell the operator typed in.
+            if (-not $PSCmdlet.ShouldProcess($n, 'Restart-GreenroomSession')) { continue }
+
+            # A declined UAC prompt THROWS; caught so it cannot abandon the instances after
+            # this one, and reported through this command so -ErrorAction still decides.
+            try { $proceed = Assert-CanActOnInstance -Name $n -Command 'Restart-GreenroomSession' -NoElevate:$NoElevate }
+            catch { $PSCmdlet.WriteError($_); continue }
+            if (-not $proceed) { continue }
+
+            # Said BEFORE anything is stopped, while it is still actionable. A restart re-runs
+            # the task and the task names the VERSIONED asset path, so with a new module merely
+            # staged this brings the old version straight back up -- silently, and looking
+            # exactly like a successful upgrade. Measured on a host that did precisely that.
+            $asset = Get-InstanceAssetVersion -Name $n
+            if ($asset -and $asset -ne $script:GreenroomModuleVersion) {
+                Write-Warning ("'$n' runs $asset assets while module $script:GreenroomModuleVersion is loaded. " +
+                               "Restarting re-runs the task, so it will come back up on $asset. To move it: " +
+                               "Update-GreenroomInstance -Name $n")
+            }
+
+            $esc    = [regex]::Escape($n)
+            $shells = 'pwsh.exe', 'powershell.exe'
+            $killed =
+                (Stop-VerifiedProcess -ProcessName $shells      -Pattern ('greenroom-watchdog.*-Instance\s+"?' + $esc + '("|\s|$)') -Label 'watchdog') +
+                (Stop-VerifiedProcess -ProcessName 'claude.exe' -Pattern ('--remote-control\s+"?' + $esc + '("|\s|$)')                 -Label 'session')  +
+                (Stop-VerifiedProcess -ProcessName $shells      -Pattern ('greenroom-launch.*-Instance\s+"?' + $esc + '("|\s|$)')   -Label 'launcher')
+
+            if ($killed -eq 0) { Write-Verbose "nothing was running for '$n'" }
+
+            Start-Sleep -Seconds 2
+            Start-ScheduledTask -TaskName "greenroom-$n"
+
+            # Confirm by observation: the task returning success only means the watchdog was
+            # launched, not that a session came up behind it. Counted polls, not a wall-clock
+            # deadline -- under test a mocked sleep turned the deadline loop into a busy-wait
+            # that spun for the full timeout.
+            $up = $null
+            for ($i = 0; $i -lt [int][math]::Ceiling($TimeoutSeconds / 0.75); $i++) {
+                Start-Sleep -Milliseconds 750
+                $got = @(Get-GreenroomInstance -Name $n -WarningAction SilentlyContinue)
+                if ($got.Count -eq 1 -and -not $got[0].Opaque) { $up = $got[0]; break }
+            }
+            if ($up) { $up; continue }
+
+            # An unelevated shell cannot read an elevated session's command line, so absence
+            # here is not evidence of failure. Saying so beats reporting a false one.
+            if ((Test-InstanceElevated -Name $n) -and -not (Test-SelfElevated)) {
+                Write-Warning ("cannot confirm '$n' from an unelevated shell: an elevated session is " +
+                               'unreadable here. Re-check with Get-GreenroomInstance from an elevated shell.')
+                continue
+            }
+
+            Write-Error -Category OperationTimeout -Message (
+                "'$n' did not come up within $TimeoutSeconds s. Check: Get-Content " +
+                "`"$(Join-Path (Get-GreenroomStateRoot) "$n\watchdog.log")`" -Tail 20")
         }
-
-        $task = "greenroom-$Name"
-
-        if (Test-SelfIsInstance -Name $Name) {
-            Write-Error -Category InvalidOperation -Message (
-                "'$Name' is the session this shell is running inside. Restarting it from here would kill " +
-                'this process partway through, before the task is started again, leaving the instance down ' +
-                "rather than restarted. Run it from a shell outside the session.")
-            return
-        }
-
-        # Gated before escalation: a new elevated process starts with its own
-        # $WhatIfPreference and $ConfirmPreference, so -WhatIf must stop here rather than
-        # be re-decided against defaults over there, and -Confirm must prompt in the
-        # shell the operator typed in.
-        if (-not $PSCmdlet.ShouldProcess($Name, 'Restart-GreenroomSession')) { return }
-
-        if (-not (Assert-CanActOnInstance -Name $Name -Command 'Restart-GreenroomSession' -NoElevate:$NoElevate)) {
-            return
-        }
-
-        # Said BEFORE anything is stopped, while it is still actionable. A restart re-runs
-        # the task and the task names the VERSIONED asset path, so with a new module merely
-        # staged this brings the old version straight back up -- silently, and looking
-        # exactly like a successful upgrade. Measured on a host that did precisely that.
-        $asset = Get-InstanceAssetVersion -Name $Name
-        if ($asset -and $asset -ne $script:GreenroomModuleVersion) {
-            Write-Warning ("'$Name' runs $asset assets while module $script:GreenroomModuleVersion is loaded. " +
-                           "Restarting re-runs the task, so it will come back up on $asset. To move it: " +
-                           "Install-GreenroomInstance -Name $Name -NoStart, then Restart-GreenroomSession $Name.")
-        }
-
-        $esc = [regex]::Escape($Name)
-
-        $shells = 'pwsh.exe', 'powershell.exe'
-        $stopped =
-            (Stop-VerifiedProcess -ProcessName $shells       -Pattern ('greenroom-watchdog.*-Instance\s+"?' + $esc + '("|\s|$)') -Label 'watchdog') +
-            (Stop-VerifiedProcess -ProcessName 'claude.exe'  -Pattern ('--remote-control\s+"?' + $esc + '("|\s|$)')                 -Label 'session')  +
-            (Stop-VerifiedProcess -ProcessName $shells       -Pattern ('greenroom-launch.*-Instance\s+"?' + $esc + '("|\s|$)')   -Label 'launcher')
-
-        if ($stopped -eq 0) { Write-Verbose "nothing was running for '$Name'" }
-
-        Start-Sleep -Seconds 2
-        Start-ScheduledTask -TaskName $task
-
-        # Confirm by observation. The task returning success only means the watchdog was
-        # launched, not that a session came up behind it.
-        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-        while ((Get-Date) -lt $deadline) {
-            Start-Sleep -Milliseconds 750
-            $up = @(Get-GreenroomInstance -Name $Name -WarningAction SilentlyContinue)
-            if ($up.Count -eq 1 -and -not $up[0].Opaque) { return $up[0] }
-        }
-
-        # An unelevated shell cannot read an elevated session's command line, so absence
-        # here is not evidence of failure. Saying so beats reporting a false one.
-        if ((Test-InstanceElevated -Name $Name) -and -not (Test-SelfElevated)) {
-            Write-Warning ("cannot confirm '$Name' from an unelevated shell: an elevated session is " +
-                           'unreadable here. Re-check with Get-GreenroomInstance from an elevated shell.')
-            return
-        }
-
-        Write-Error -Category OperationTimeout -Message (
-            "'$Name' did not come up within $TimeoutSeconds s. Check: Get-Content " +
-            "`"$(Join-Path (Get-GreenroomStateRoot) "$Name\watchdog.log")`" -Tail 20")
     }
 }

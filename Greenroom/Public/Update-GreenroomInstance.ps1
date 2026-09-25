@@ -73,8 +73,8 @@ function Update-GreenroomInstance {
 
     # Registration IS the scheduled task, so that is what is enumerated -- a state
     # directory without a task is a half-uninstalled remnant, not something to restart.
-    $tasks = @(Get-ScheduledTask -TaskName 'greenroom-*' -ErrorAction SilentlyContinue)
-    $names = @($tasks | ForEach-Object { $_.TaskName -replace '^greenroom-', '' })
+    # Shared with the session commands; Update keeps its own no-name rule (every instance).
+    $names = @(Get-RegisteredInstanceName)
     if ($Name) { $names = @($names | Where-Object { $_ -like $Name }) }
 
     if ($names.Count -eq 0) {

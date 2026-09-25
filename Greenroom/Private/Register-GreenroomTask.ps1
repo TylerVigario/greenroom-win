@@ -55,7 +55,7 @@ function Register-GreenroomTask {
     $desc = "Always-on greenroom session '$Name' in $WorkingDirectory. Started hidden at logon; reveal with Show-GreenroomSession."
     if ($Elevated) { $desc += ' RUNS ELEVATED.' }
 
-    if (Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue) {
+    if (Get-ScheduledTask -TaskPath '\' -TaskName $task -ErrorAction Ignore) {
         Write-Verbose "replacing pre-existing task '$task'"
     }
 
