@@ -24,7 +24,7 @@ GUID = '518689f0-0456-4317-a7e1-daa1eaf66161'
 Author = 'Tyler Vigario'
 
 # Company or vendor of this module
-CompanyName = 'Vigario Technology Solutions'
+CompanyName = ''
 
 # Copyright statement for this module
 Copyright = '(c) 2026 Tyler Vigario. AGPL-3.0-or-later.'
