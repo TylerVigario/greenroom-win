@@ -55,6 +55,14 @@ absent from the payload.
 **Apply only after every context has reported at least once.** A context that has
 never run cannot be distinguished from one that is pending.
 
+**`code_scanning` gates on CodeQL, and CodeQL has to keep answering.** A pull
+request cannot merge while CodeQL reports an alert at `error`, or a security alert
+at `high` or above — an alert anybody may leave open becomes one nothing merges
+past. It also cannot merge while CodeQL's analysis is still running, or if CodeQL
+is not configured on the repository at all: switching off code scanning's default
+setup wedges every pull request, loudly, until this rule is relaxed. The tool name
+must match what CodeQL reports as, which is `CodeQL`.
+
 **`pull_request` requires zero approving reviews, deliberately.** GitHub does not
 allow approving your own pull request, so any non-zero count deadlocks a
 single-owner repository outright. Do not "fix" this.
