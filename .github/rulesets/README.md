@@ -83,20 +83,21 @@ visible act rather than a standing exemption.
 
 ## `tag.json`
 
-`deletion` + `non_fast_forward` on every tag, with **no bypass actors** — the
-release App is exempt from `main-protection` only. It does not need an exemption
-here, because neither rule blocks *creating* a tag, which is all a release does.
+`deletion` + `non_fast_forward` + `update` on every tag, with **no bypass actors** —
+the release App is exempt from `main-protection` only. It does not need an
+exemption here, because none of the three blocks *creating* a tag, which is all a
+release does.
 
-**This is not quite immutability, and the gap is a convention rather than a rule.**
-Those two rules stop an *annotated* tag being re-pointed, because the new tag
-object is not a descendant of the old one. A *lightweight* tag moved to a
-descendant commit is a fast-forward, and is allowed. Immutability therefore rests
-on always creating annotated tags, which `cog bump --annotated` does — see the
-`post_bump_hooks` in `cog.toml`.
+**`update` is the rule that makes tags immutable.** `deletion` and
+`non_fast_forward` read as complete tag protection and are not: advancing a tag to
+a descendant commit is a fast-forward, so neither objects. `update` refuses any
+move of a ref that already exists while still admitting one that does not, so a
+tag is create-once — the first push of a name is accepted and every later push of
+that name is refused, whether the tag is annotated or lightweight.
 
-Adding the `update` rule would remove that dependency on tag type. It is not here
-because it is not applied; adding it means changing this file **and** applying it,
-not one or the other.
+**No bypass actor, and that is the guarantee rather than a detail.** A bypass
+reaches every rule in a ruleset, so an actor listed here would be past `update`
+and `deletion` as readily as anything else.
 
 One version number naming two different sets of bits is the failure this prevents,
 and it matters most where something downstream builds from a tag — here, the
