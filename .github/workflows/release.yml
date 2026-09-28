@@ -13,7 +13,8 @@ name: Release
 #
 # WHY THIS NEEDS A GITHUB APP.
 #
-# main refuses direct pushes, so something has to be allowed through. The App is a bypass
+# main refuses direct writes, and a release moves it to the version commit, so something
+# has to be allowed through. The App is a bypass
 # actor on the ruleset, and the exemption is deliberately narrow in what it is used for:
 # one commit containing only CHANGELOG.md and the manifest. Nothing else in this
 # repository uses the App, and no other workflow reads its secrets.
@@ -69,9 +70,11 @@ name: Release
 #      Re-apply only after the App is installed: GitHub rejects a bypass actor it cannot
 #      resolve, and the whole PUT fails with a 422.
 #
-# Dry-run first. `dry-run: true` exercises the token mint, the checkout, `cog check` and the
-# version derivation without pushing, so it needs neither the bypass nor the re-apply — it
-# proves everything except the one step that cannot be rehearsed.
+# Dry-run first. `dry-run: true` exercises the token mint, the checkout, `cog check`, the
+# version derivation, the bump on the runner, and GitHub constructing and signing the
+# version commit on a temporary branch, which it then deletes. It publishes nothing and
+# records nothing, so it needs neither the bypass nor the re-apply — it proves everything
+# except the two steps that cannot be rehearsed.
 
 on:
   workflow_dispatch:
@@ -133,11 +136,11 @@ jobs:
           # brings them; stating it means a later change to the depth cannot quietly
           # remove them.
           fetch-tags: true
-          # Checked out WITH the App token, and `persist-credentials` defaults to true, so
-          # the token lands in .git/config and cog's push authenticates as the App -- the
-          # identity the ruleset bypasses. Setting persist-credentials: false here would
-          # break the release at the point of no return, not at checkout.
+          # Nothing is pushed from this checkout: the version commit, the tag and the move of
+          # main all go through the API with the App token. So the token is not left in
+          # .git/config, where every later step could read it.
           token: ${{ steps.app.outputs.token }}
+          persist-credentials: false
           ref: main
 
       # THE PRECONDITION THE REST OF THIS WORKFLOW ASSUMED WITHOUT CHECKING.
@@ -234,8 +237,8 @@ jobs:
       #   called `Result::unwrap()` on an Err value: "config value 'user.name' was not found"
       # exit 134, a core dump rather than an error. A runner has no identity by default.
       #
-      # The bump commit is made by the App, so it is attributable to the App rather than to
-      # a person who did not write it.
+      # The bump commit made here never leaves the runner -- GitHub constructs the one that is
+      # recorded -- but cog needs an identity to make it, and the App's is the true one.
       - name: Identify as the release App
         env:
           APP_SLUG: ${{ steps.app.outputs.app-slug }}
@@ -247,7 +250,7 @@ jobs:
       #
       # cog check proves history parses; the dry run proves a version can be derived and
       # that the branch whitelist allows this branch; the tag check catches a re-run of a
-      # release that already happened, which would otherwise fail at the push.
+      # release that already happened, which would otherwise fail at recording.
       - name: Pre-flight
         id: plan
         env:
@@ -269,13 +272,13 @@ jobs:
       # BUILD THE RELEASE ON THE RUNNER. cog bump runs the pre-bump hook (ModuleVersion and
       # release notes into the manifest), prepends the changelog, commits, and creates the
       # annotated tag -- and nothing else: cog.toml has no post-bump hook, so nothing leaves
-      # the runner here. A failure at any point is the same as nothing having happened.
+      # the runner here. A failure at any point is the same as nothing having happened, which
+      # is also why this runs on a dry run.
       #
       # Annotated, not lightweight: a tag object records who tagged the release and when,
       # which a bare ref cannot. Keeping the tag where it was put is not the tag type's
       # job -- the tag ruleset's `update` rule refuses any move of an existing tag.
       - name: Build the release
-        if: ${{ !inputs.dry-run }}
         env:
           VERSION: ${{ inputs.version }}
         run: |
@@ -285,6 +288,58 @@ jobs:
           else
             cog bump --version "$VERSION" --annotated "greenroom-win {{version}}"
           fi
+
+      # GITHUB BUILDS THE COMMIT THAT GETS RECORDED. A commit pushed from here would arrive
+      # unsigned whatever token pushed it; one GitHub constructs through the API, given no
+      # author, committer or signature, carries GitHub's signature. createCommitOnBranch
+      # needs a branch, so it builds on `release/<tag>` -- started at the green commit,
+      # outside every ruleset, and deleted at the end of the run.
+      #
+      # Checked BEFORE anything is published, because afterwards it is too late to care:
+      # the tree GitHub built must be the tree the runner built, id for id, and the commit
+      # must carry a valid signature. Either failing stops the release with nothing
+      # published. Runs on a dry run too -- nothing it creates is referenced by main or by
+      # a tag, and the branch is deleted.
+      - name: Have GitHub construct the version commit
+        id: construct
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          BASE: ${{ steps.gate.outputs.sha }}
+          BRANCH: release/${{ steps.plan.outputs.next }}
+        run: |
+          set -euo pipefail
+
+          # The local bump must sit directly on the commit that was verified green.
+          [ "$(git rev-parse HEAD~1)" = "$BASE" ] || { echo "::error::the local bump is not on $BASE"; exit 1; }
+
+          # A branch to build on, starting at the green commit. Not the default branch, so no
+          # ruleset governs it; it is deleted at the end of the run whatever happens.
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/heads/$BRANCH" -f sha="$BASE" --silent
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+          # Every file the bump changed, byte for byte. No author, committer or signature is
+          # supplied: GitHub constructs the commit and signs it.
+          additions=$(git diff --name-only HEAD~1 HEAD | while IFS= read -r path; do
+            git cat-file blob "HEAD:$path" | base64 -w0 | jq -Rs --arg p "$path" '{path: $p, contents: .}'
+          done | jq -s .)
+          query='mutation($input: CreateCommitOnBranchInput!) {
+            createCommitOnBranch(input: $input) { commit { oid tree { oid } signature { isValid signer { login } } } } }'
+          commit=$(jq -n --arg q "$query" --arg repo "$GITHUB_REPOSITORY" --arg b "$BRANCH" --arg h "$BASE" \
+                        --arg head "$(git log -1 --format=%s)" --argjson adds "$additions" \
+            '{query: $q, variables: {input: {branch: {repositoryNameWithOwner: $repo, branchName: $b},
+              expectedHeadOid: $h, message: {headline: $head}, fileChanges: {additions: $adds}}}}' \
+            | gh api graphql --input - --jq .data.createCommitOnBranch.commit)
+
+          sha=$(jq -r .oid <<<"$commit")
+          tree=$(jq -r .tree.oid <<<"$commit")
+          valid=$(jq -r '.signature.isValid // false' <<<"$commit")
+          signer=$(jq -r '.signature.signer.login // "nobody"' <<<"$commit")
+          echo "constructed $sha -- tree $tree, signed by $signer, valid=$valid"
+
+          # What gets published must be exactly what gets recorded: the same tree, to the byte.
+          [ "$tree" = "$(git rev-parse 'HEAD^{tree}')" ] || { echo "::error::GitHub built tree $tree, not the runner's $(git rev-parse 'HEAD^{tree}')"; exit 1; }
+          [ "$valid" = "true" ] || { echo "::error::the version commit is not signed"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
       # Provisioning is a NAMED STEP rather than something the publish does on its way
       # past, for the same reason the check jobs declare their modules: a runner image that
@@ -307,8 +362,8 @@ jobs:
       # and never precedes it: recorded first, a failed publish would leave the repository
       # asserting a release nobody can install.
       #
-      # Published from the tree cog just committed, so the module carries the new
-      # ModuleVersion. A FAILED publish leaves nothing behind -- nothing has been pushed --
+      # Published from the tree cog just committed -- the tree the previous step proved
+      # identical to the commit GitHub built -- so the module carries the new ModuleVersion. A FAILED publish leaves nothing behind -- nothing has been pushed --
       # and the whole workflow re-runs. A SUCCEEDED one makes a re-run fail here, as the
       # pre-flight tag check does for the tag.
       #
@@ -326,23 +381,38 @@ jobs:
           Publish-PSResource -Path ./Greenroom -Repository PSGallery -ApiKey $env:PSGALLERY_API_KEY -ErrorAction Stop
           Write-Host "published $((Import-PowerShellDataFile ./Greenroom/Greenroom.psd1).ModuleVersion) to PSGallery"
 
-      # RECORD WHAT WAS PUBLISHED, as one operation. `--atomic` makes the server take the
-      # bump commit and the tag together or neither; pushed separately, a failure between
-      # them would leave main carrying a bump for a tag that does not exist.
+      # RECORD WHAT WAS PUBLISHED: the tag first, then main.
       #
-      # $TAG is what `cog bump --dry-run` printed in pre-flight, which is the TAG -- `v`
-      # prefix included -- not the bare version. The ref pushed must carry the prefix:
-      # `git push origin 0.2.0` pushes nothing and says nothing.
+      # The tag goes on the commit GitHub constructed -- the exact bits the gallery now
+      # carries -- before main is touched, so whatever happens next, the version names what
+      # shipped. An annotated tag object, tagged by the App, then its ref.
       #
-      # If this fails, the module is already on the gallery. The likely cause is main having
-      # moved since the green check: the push is not forced, so it is refused. The runner's
-      # commit and tag go with it, and the bump has to be landed by hand for the version the
-      # gallery now carries.
+      # Then main is moved to that commit, never forced. If main moved since the green check,
+      # this is refused: the release is published and tagged, and only main lacks the bump,
+      # which is landed by hand. That failure is loud and recoverable; a forced move would
+      # silently drop whatever landed in between.
       - name: Record the release
         if: ${{ !inputs.dry-run }}
         env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
           TAG: ${{ steps.plan.outputs.next }}
-        run: git push --atomic origin main "$TAG"
+          COMMIT: ${{ steps.construct.outputs.sha }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          repo="repos/$GITHUB_REPOSITORY"
+          object=$(jq -n --arg t "$TAG" --arg m "greenroom-win ${TAG#v}" --arg o "$COMMIT" \
+                        --arg n "$APP_SLUG[bot]" --arg e "$APP_SLUG[bot]@users.noreply.github.com" \
+                        --arg d "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{tag: $t, message: $m, object: $o, type: "commit", tagger: {name: $n, email: $e, date: $d}}' \
+            | gh api "$repo/git/tags" --input - --jq .sha)
+          gh api "$repo/git/refs" -f ref="refs/tags/$TAG" -f sha="$object" --silent
+          echo "tagged $TAG -> $COMMIT"
+          if ! gh api -X PATCH "$repo/git/refs/heads/main" -f sha="$COMMIT" -F force=false --silent; then
+            echo "::error::$TAG is published and tagged at $COMMIT, but main could not be moved to it -- main has moved since the green check. Land the bump on main by hand."
+            exit 1
+          fi
+          echo "main -> $COMMIT"
 
       # Last, once the tag exists on the server, and re-runnable by hand. Notes come from the
       # changelog section cog just generated, so the Release page and CHANGELOG.md cannot
@@ -357,16 +427,25 @@ jobs:
           cog changelog --at "$TAG" > /tmp/notes.md
           gh release create "$TAG" --title "$TAG" --notes-file /tmp/notes.md --verify-tag
 
+      # The build branch has done its job once the commit exists, or failed to. Deleted on
+      # every outcome, including a dry run and a failure, so a re-run can create it again.
+      - name: Delete the build branch
+        if: ${{ always() && steps.construct.outputs.branch != '' }}
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          BRANCH: ${{ steps.construct.outputs.branch }}
+        run: gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH" --silent
+
       - name: Summary
         run: |
           {
             echo "### ${{ steps.plan.outputs.next }}"
             echo
             if [ "${{ inputs.dry-run }}" = "true" ]; then
-              echo "Dry run — nothing was changed."
+              echo "Dry run — GitHub constructed and signed \`${{ steps.construct.outputs.sha }}\` on a temporary branch, since deleted. Nothing was published or recorded."
             else
               echo "Released. The tag, the changelog and ModuleVersion moved together."
-              echo "From commit \`${{ steps.gate.outputs.sha }}\`, verified green before anything was created."
+              echo "From commit \`${{ steps.gate.outputs.sha }}\`, verified green before anything was created, and recorded as \`${{ steps.construct.outputs.sha }}\`, which GitHub constructed and signed."
               echo
               echo '```powershell'
               echo "Update-PSResource Greenroom     # or Install-PSResource Greenroom -TrustRepository"
