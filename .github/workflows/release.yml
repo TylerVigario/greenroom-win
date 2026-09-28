@@ -1,9 +1,11 @@
 name: Release
 
-# One manual run does the whole release: version into the manifest, changelog, commit,
-# annotated tag, both refs pushed together, GitHub Release, and the module published to
-# the PowerShell Gallery. There is no release pull request — the bump lands on main
-# directly, as one commit produced from commits that already passed the gate.
+# One manual run does the whole release, publication first and the record after: the
+# version, release notes and changelog built into a commit and annotated tag on the
+# runner; the module published to the PowerShell Gallery; then the commit and tag pushed
+# together and the GitHub Release created. There is no release pull request — the bump
+# lands on main directly, as one commit produced from commits that already passed the
+# gate.
 #
 # THE GALLERY IS THE PRODUCT. Everything before it is bookkeeping: what an operator
 # actually consumes is `Install-PSResource Greenroom`, so a release that tags but does not
@@ -264,19 +266,15 @@ jobs:
             echo "::error::$next already exists as a tag"; exit 1
           fi
 
-      # THE POINT OF NO RETURN, and it is one operation.
-      #
-      # cog bump runs the pre-bump hooks, writes the manifest, commits, creates the
-      # annotated tag, then runs the post-bump hook -- a single `git push --atomic origin
-      # main v<version>`. The server takes both refs or neither, so a failure at any point
-      # leaves main untouched and the whole run re-runnable. A failure BEFORE the push
-      # leaves a commit and tag on a runner that is about to be destroyed, which is the
-      # same thing as nothing having happened.
+      # BUILD THE RELEASE ON THE RUNNER. cog bump runs the pre-bump hook (ModuleVersion and
+      # release notes into the manifest), prepends the changelog, commits, and creates the
+      # annotated tag -- and nothing else: cog.toml has no post-bump hook, so nothing leaves
+      # the runner here. A failure at any point is the same as nothing having happened.
       #
       # Annotated, not lightweight: a tag object records who tagged the release and when,
       # which a bare ref cannot. Keeping the tag where it was put is not the tag type's
       # job -- the tag ruleset's `update` rule refuses any move of an existing tag.
-      - name: Release
+      - name: Build the release
         if: ${{ !inputs.dry-run }}
         env:
           VERSION: ${{ inputs.version }}
@@ -287,20 +285,6 @@ jobs:
           else
             cog bump --version "$VERSION" --annotated "greenroom-win {{version}}"
           fi
-
-      # After the atomic push this is the only step left, and it is re-runnable by hand
-      # because the tag already exists. Notes come from the changelog section cog just
-      # generated, so the Release page and CHANGELOG.md cannot drift apart -- they are the
-      # same text.
-      - name: Publish the GitHub Release
-        if: ${{ !inputs.dry-run }}
-        env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
-          TAG: ${{ steps.plan.outputs.next }}
-        run: |
-          set -euo pipefail
-          cog changelog --at "$TAG" > /tmp/notes.md
-          gh release create "$TAG" --title "$TAG" --notes-file /tmp/notes.md --verify-tag
 
       # Provisioning is a NAMED STEP rather than something the publish does on its way
       # past, for the same reason the check jobs declare their modules: a runner image that
@@ -317,18 +301,19 @@ jobs:
             Install-Module Microsoft.PowerShell.PSResourceGet -Scope CurrentUser -Force -AllowClobber
           }
 
-      # LAST, and after the tag exists. The manifest only carries the new ModuleVersion
-      # once cog bump has written it, so publishing any earlier would ship the previous
-      # version under the new tag's name.
+      # THE POINT OF NO RETURN, and it comes FIRST. PSGallery does not allow a version to be
+      # replaced, only deprecated, so publishing is the one step nothing can take back. The
+      # record of a release -- the bump on main, the tag, the GitHub Release -- follows it
+      # and never precedes it: recorded first, a failed publish would leave the repository
+      # asserting a release nobody can install.
       #
-      # This is the one step that cannot be undone by re-running: PSGallery does not allow
-      # a version to be replaced, only deprecated. A FAILED publish is re-runnable by hand
-      # with the same command; a SUCCEEDED one makes a re-run of the whole workflow fail
-      # here, exactly as the pre-flight tag check already does for the tag itself.
+      # Published from the tree cog just committed, so the module carries the new
+      # ModuleVersion. A FAILED publish leaves nothing behind -- nothing has been pushed --
+      # and the whole workflow re-runs. A SUCCEEDED one makes a re-run fail here, as the
+      # pre-flight tag check does for the tag.
       #
       # Deliberately not `continue-on-error`: a release whose module never reached the
-      # gallery is a half-release, and it should be loud rather than a green tick hiding a
-      # tag nobody can install.
+      # gallery has not shipped, and it should be loud rather than a green tick.
       - name: Publish to the PowerShell Gallery
         if: ${{ !inputs.dry-run }}
         shell: pwsh
@@ -336,10 +321,41 @@ jobs:
           PSGALLERY_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
         run: |
           if (-not $env:PSGALLERY_API_KEY) {
-            throw 'PSGALLERY_API_KEY is not set on the release environment. The tag and GitHub Release already exist; publish by hand with Publish-PSResource once the secret is in place.'
+            throw 'PSGALLERY_API_KEY is not set on the release environment. Nothing has been published or pushed; set the secret and re-run.'
           }
           Publish-PSResource -Path ./Greenroom -Repository PSGallery -ApiKey $env:PSGALLERY_API_KEY -ErrorAction Stop
           Write-Host "published $((Import-PowerShellDataFile ./Greenroom/Greenroom.psd1).ModuleVersion) to PSGallery"
+
+      # RECORD WHAT WAS PUBLISHED, as one operation. `--atomic` makes the server take the
+      # bump commit and the tag together or neither; pushed separately, a failure between
+      # them would leave main carrying a bump for a tag that does not exist.
+      #
+      # $TAG is what `cog bump --dry-run` printed in pre-flight, which is the TAG -- `v`
+      # prefix included -- not the bare version. The ref pushed must carry the prefix:
+      # `git push origin 0.2.0` pushes nothing and says nothing.
+      #
+      # If this fails, the module is already on the gallery. The likely cause is main having
+      # moved since the green check: the push is not forced, so it is refused. The runner's
+      # commit and tag go with it, and the bump has to be landed by hand for the version the
+      # gallery now carries.
+      - name: Record the release
+        if: ${{ !inputs.dry-run }}
+        env:
+          TAG: ${{ steps.plan.outputs.next }}
+        run: git push --atomic origin main "$TAG"
+
+      # Last, once the tag exists on the server, and re-runnable by hand. Notes come from the
+      # changelog section cog just generated, so the Release page and CHANGELOG.md cannot
+      # drift apart -- they are the same text.
+      - name: Publish the GitHub Release
+        if: ${{ !inputs.dry-run }}
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          TAG: ${{ steps.plan.outputs.next }}
+        run: |
+          set -euo pipefail
+          cog changelog --at "$TAG" > /tmp/notes.md
+          gh release create "$TAG" --title "$TAG" --notes-file /tmp/notes.md --verify-tag
 
       - name: Summary
         run: |
