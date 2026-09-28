@@ -1,0 +1,88 @@
+name: Bug report
+description: greenroom did something wrong, or failed to do what it says it does.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A security issue does not go here — see [SECURITY.md](https://github.com/TylerVigario/greenroom-win/blob/main/SECURITY.md) and report it privately.
+
+        [Troubleshooting](https://github.com/TylerVigario/greenroom-win/blob/main/docs/troubleshooting.md) covers the failures that have been seen before.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you ran, and what it did.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: From a state someone else can get to. Commands exactly as run.
+      render: powershell
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: greenroom version
+      description: "`Get-Module Greenroom -ListAvailable`"
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows build
+      description: "`[Environment]::OSVersion.Version`, or `winver`"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: edition
+    attributes:
+      label: PowerShell edition
+      description: The one you ran greenroom's commands from.
+      options:
+        - PowerShell 7
+        - Windows PowerShell 5.1
+        - Both
+    validations:
+      required: true
+
+  - type: dropdown
+    id: elevated
+    attributes:
+      label: Is the instance elevated?
+      description: The `Elevated` column of `Get-GreenroomInstance`.
+      options:
+        - "No"
+        - "Yes"
+        - More than one instance, mixed
+    validations:
+      required: true
+
+  - type: textarea
+    id: instances
+    attributes:
+      label: "`Get-GreenroomInstance` output"
+      render: text
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        The relevant part of `%USERPROFILE%\.claude\greenroom\<instance>\watchdog.log` and `launch.log`. Both are in local time.
+      render: text
