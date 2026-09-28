@@ -59,25 +59,11 @@ pre_bump_hooks = [
     'git add Greenroom/Greenroom.psd1',
 ]
 
-# ONE ATOMIC PUSH, and that is the whole point of this hook.
-#
-# The branch and the tag are separate refs. Pushed separately, a failure between them
-# leaves main carrying a bump commit for a release that has no tag -- a half state nobody
-# can see from either side. `--atomic` makes the server take both refs or neither, so the
-# failure modes that actually exist (a transient fault, a cancelled runner, a re-run where
-# the tag is already present, or a tag ruleset rejecting the tag) all leave main untouched
-# and the whole run re-runnable.
-#
-# `v{{version}}` and not `{{version}}`: the template expands to the VERSION, which is bare,
-# while the thing being pushed is a REF, which carries the prefix. Getting it wrong is
-# silent -- `git push origin 0.2.0` pushes nothing, the tag stays on the runner, and the
-# release exists nowhere. Both surfaces were measured rather than inferred from each other,
-# because they read differently: `cog bump --dry-run` prints the prefixed `v0.2.0` (it is
-# telling you the tag) while the hook template gives the bare `0.2.0` (it is giving you the
-# version).
-post_bump_hooks = [
-    'git push --atomic origin main v{{version}}',
-]
+# NO POST-BUMP HOOK. `cog bump` builds the release on the runner -- manifest, changelog,
+# commit, annotated tag -- and stops there. Pushing is not its job, because the release
+# is recorded only AFTER the module is on the gallery: publication is the step that
+# cannot be taken back, so the record follows it. release.yml does the publish, then the
+# push. A hook here would push first by construction.
 
 [changelog]
 path = "CHANGELOG.md"

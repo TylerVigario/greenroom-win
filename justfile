@@ -48,7 +48,7 @@ analyze:
 test:
     @pwsh -NoProfile -File ./ci/check.ps1 -Phase test
 
-# The four below need cocogitto on PATH. `just check` deliberately does not -- the gate
+# The three below need cocogitto on PATH. `just check` deliberately does not -- the gate
 # stays runnable with nothing but pwsh, and commit tooling is not something you should have
 # to install to find out whether the tree is sound.
 #
@@ -82,9 +82,3 @@ lint:
 next:
     @cog bump --auto --dry-run
     @cog changelog
-
-# Normally the workflow does this -- it commits, tags and pushes in one atomic operation,
-# and pushing from a laptop bypasses the App identity the ruleset expects.
-# Release by hand, when the workflow cannot.
-release version="--auto":
-    @cog bump {{ if version == "--auto" { "--auto" } else { "--version " + version } }} --annotated "greenroom-win {{{{version}}"
