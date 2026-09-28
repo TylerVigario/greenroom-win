@@ -266,10 +266,9 @@ jobs:
       # leaves a commit and tag on a runner that is about to be destroyed, which is the
       # same thing as nothing having happened.
       #
-      # Annotated, not lightweight, and deliberately: tag rules block re-pointing an
-      # annotated tag because the new tag object is not a descendant of the old, while a
-      # lightweight tag moved to a descendant commit is a fast-forward and would be
-      # permitted.
+      # Annotated, not lightweight: a tag object records who tagged the release and when,
+      # which a bare ref cannot. Keeping the tag where it was put is not the tag type's
+      # job -- the tag ruleset's `update` rule refuses any move of an existing tag.
       - name: Release
         if: ${{ !inputs.dry-run }}
         env:
