@@ -22,9 +22,8 @@ name: Commit convention
 #              exactly what a changelog tool swallows in silence.
 #
 # cocogitto is installed as a PINNED BINARY rather than through its action: one less
-# third-party action to trust while SHA-pinning is undecided estate-wide, and it pins the
-# exact version the release path will be tested against instead of whatever a floating
-# action tag resolves to that day.
+# third-party action to trust, and it pins the exact version the release path will be
+# tested against instead of whatever a floating action tag resolves to that day.
 
 on:
   pull_request:
@@ -47,7 +46,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # cog verify reads one string and cog.toml. No history needed.
           fetch-depth: 1
@@ -80,7 +79,7 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # cog check walks history, so it needs all of it.
           fetch-depth: 0
