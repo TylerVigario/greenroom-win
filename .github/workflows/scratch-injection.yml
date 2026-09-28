@@ -1,0 +1,12 @@
+# THROWAWAY -- proves the code_scanning merge gate refuses a known CodeQL finding.
+# Never merged. pull_request_target runs only from the default branch, so this copy never
+# executes; CodeQL still analyses it on the pull request.
+name: scratch-injection
+on: pull_request_target
+permissions:
+  contents: read
+jobs:
+  echo-title:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "${{ github.event.pull_request.title }}"
