@@ -103,9 +103,11 @@ request record — the repository is the diff.
 
 Releases are automated and run from `main` only, publication first and the record after.
 `cog bump` writes the version and that version's release notes into the manifest,
-updates the changelog, and commits and tags on the runner; the module is published to
-the PowerShell Gallery; only then are the commit and tag pushed, together, and the GitHub
-Release created. A publish that fails leaves nothing pushed.
+updates the changelog, and commits and tags on the runner. GitHub then constructs and
+signs that same commit through its API, proven identical to the runner's before anything
+ships. The module is published to the PowerShell Gallery; only then is that commit tagged,
+`main` moved to it, and the GitHub Release created. A publish that fails leaves nothing
+recorded.
 
 Do not tag or release by hand. See the header of
 [`.github/workflows/release.yml`](.github/workflows/release.yml) for the setup it depends
