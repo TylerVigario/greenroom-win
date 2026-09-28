@@ -30,7 +30,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: extractions/setup-just@v4
+    - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
 
     # Provisioning is a NAMED STEP, not something a check does to a machine on its way
     # past. It is usually a no-op -- windows-latest ships both modules today -- and it

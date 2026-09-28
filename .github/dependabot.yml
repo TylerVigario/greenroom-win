@@ -5,6 +5,10 @@
 # new versions when nothing is wrong, which is the half that keeps a pin from quietly
 # aging into one.
 #
+# PINS ARE COMMITS, with the release they came from as a trailing comment:
+# `actions/checkout@<40-hex sha> # v7.0.1`. A tag names whatever it points at today; a
+# commit names one set of bits. Dependabot rewrites the commit and the comment together.
+#
 # ONLY github-actions. There is no other ecosystem here -- the module is PowerShell, its
 # two check dependencies (Pester, PSScriptAnalyzer) are MinimumVersion floors resolved on
 # the runner rather than pinned artifacts, and cocogitto is fetched as a pinned release
