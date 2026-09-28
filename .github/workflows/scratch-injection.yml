@@ -3,8 +3,6 @@
 # executes; CodeQL still analyses it on the pull request.
 name: scratch-injection
 on: pull_request_target
-permissions:
-  contents: read
 jobs:
   echo-title:
     runs-on: ubuntu-latest
