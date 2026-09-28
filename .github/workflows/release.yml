@@ -89,7 +89,12 @@ permissions:
   contents: read   # the App token does the writing, not GITHUB_TOKEN
 
 env:
+  # The version names a release asset, and cocogitto's releases are not immutable, so
+  # the file behind a version can be replaced. The checksum names the bytes: a download
+  # that does not match stops the step before cog runs. Bump both together -- the
+  # digest GitHub shows for the x86_64-unknown-linux-musl asset on that release.
   COG_VERSION: '7.0.0'
+  COG_SHA256: 'e03938ff2c4c86d71c00c0f3284dbbe95c5ca76fe34a51f33e945c23010d59bb'
 
 jobs:
   release:
@@ -218,7 +223,9 @@ jobs:
         run: |
           set -euo pipefail
           url="https://github.com/cocogitto/cocogitto/releases/download/${COG_VERSION}/cocogitto-${COG_VERSION}-x86_64-unknown-linux-musl.tar.gz"
-          curl -fsSL "$url" | tar -xz --strip-components=1 -C /usr/local/bin x86_64-unknown-linux-musl/cog
+          curl -fsSL "$url" -o "$RUNNER_TEMP/cog.tar.gz"
+          echo "$COG_SHA256  $RUNNER_TEMP/cog.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/cog.tar.gz" --strip-components=1 -C /usr/local/bin x86_64-unknown-linux-musl/cog
           cog --version
 
       # cog PANICS without a git identity, even when only linting a string:

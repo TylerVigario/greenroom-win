@@ -11,8 +11,9 @@
 #
 # ONLY github-actions. There is no other ecosystem here -- the module is PowerShell, its
 # two check dependencies (Pester, PSScriptAnalyzer) are MinimumVersion floors resolved on
-# the runner rather than pinned artifacts, and cocogitto is fetched as a pinned release
-# binary inside a workflow step, which no ecosystem models. Those stay a human decision.
+# the runner rather than pinned artifacts, and cocogitto is fetched as a release binary
+# pinned by version and checksum inside a workflow step, which no ecosystem models. Those
+# stay a human decision.
 #
 # THE PREFIX IS LOAD-BEARING, not cosmetic. Merges here are squashes, so the pull request
 # title becomes the commit message on main, and `pr-title` lints it with `cog verify`.
