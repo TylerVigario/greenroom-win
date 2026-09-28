@@ -1,0 +1,23 @@
+name: Feature request
+description: Something greenroom should do that it does not.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you were trying to do, and where greenroom got in the way. The problem matters more than the proposal.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would solve it
+      description: Optional. What you would want greenroom to do.
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What you do today instead
+      description: Optional.
