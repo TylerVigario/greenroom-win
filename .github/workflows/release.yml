@@ -109,6 +109,13 @@ jobs:
     # environment to read its secrets. The environment also restricts deployments to `main`,
     # so a release.yml dispatched from a branch cannot reach the secrets at all.
     environment: release
+    # The attestation is signed with this run's OIDC identity and stored on the repository;
+    # those are the two things the job needs beyond reading. Everything that writes to the
+    # repository itself does so with the App token, not GITHUB_TOKEN.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       - name: Mint an App token
         id: app
@@ -255,8 +262,10 @@ jobs:
         id: plan
         env:
           VERSION: ${{ inputs.version }}
+          PSGALLERY_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
         run: |
           set -euo pipefail
+          [ -n "$PSGALLERY_API_KEY" ] || { echo "::error::PSGALLERY_API_KEY is not set on the release environment"; exit 1; }
           cog check
           if [ "$VERSION" = "auto" ]; then
             next=$(cog bump --auto --dry-run)
@@ -344,17 +353,60 @@ jobs:
       # Provisioning is a NAMED STEP rather than something the publish does on its way
       # past, for the same reason the check jobs declare their modules: a runner image that
       # stops shipping PSResourceGet should fail HERE, in a step about dependencies.
+      #
+      # Present is not enough: packing once needs Compress-PSResource and
+      # `Publish-PSResource -NupkgPath`, which older PSResourceGet does not have. So the check
+      # is for the command, and an install that still lacks it fails here.
       - name: Ensure PSResourceGet
-        if: ${{ !inputs.dry-run }}
         shell: pwsh
         run: |
-          if (Get-Module Microsoft.PowerShell.PSResourceGet -ListAvailable) {
-            Write-Host "PSResourceGet: present"
+          if (Get-Command Compress-PSResource -ErrorAction SilentlyContinue) {
+            Write-Host "PSResourceGet: present, $((Get-Command Compress-PSResource).Version)"
           }
           else {
             Write-Host "PSResourceGet: installing"
             Install-Module Microsoft.PowerShell.PSResourceGet -Scope CurrentUser -Force -AllowClobber
+            Import-Module Microsoft.PowerShell.PSResourceGet -Force
+            if (-not (Get-Command Compress-PSResource -ErrorAction SilentlyContinue)) {
+              throw 'PSResourceGet has no Compress-PSResource; the package cannot be packed once'
+            }
           }
+
+      # PACKED ONCE, and that one file goes everywhere: attested, published to the gallery,
+      # attached to the GitHub Release. Packing is not reproducible -- the same tree packed
+      # twice differs in timestamps and a generated file name -- so a second pack would be a
+      # different artifact, and an attestation for one says nothing about the other.
+      #
+      # Packed from the tree the construct step proved identical to the commit GitHub built,
+      # so the package, the tag and the attestation all describe the same source. A dry run
+      # packs too, which proves the step; it attests and publishes nothing.
+      - name: Pack the module
+        id: pack
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'package'
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Compress-PSResource -Path ./Greenroom -DestinationPath $out -ErrorAction Stop
+          $pkg = @(Get-ChildItem $out -Filter *.nupkg)
+          if ($pkg.Count -ne 1) { throw "expected one package in $out, found $($pkg.Count)" }
+          $sha = (Get-FileHash $pkg[0].FullName -Algorithm SHA256).Hash.ToLower()
+          Write-Host "packed $($pkg[0].Name) sha256:$sha"
+          "nupkg=$($pkg[0].FullName)" >> $env:GITHUB_OUTPUT
+          "sha256=$sha" >> $env:GITHUB_OUTPUT
+
+      # PROVENANCE, BEFORE PUBLICATION. The attestation binds the package's digest to this
+      # workflow, this commit and this run, signed and entered in a public transparency log.
+      # It exists at publication or never -- it cannot be added to a version afterwards -- so
+      # it comes first: nothing reaches the gallery unattested.
+      #
+      # If the publish then fails, a re-run packs again, and the new bytes get their own
+      # attestation. The first one names bytes no channel serves, so no hash anyone computes
+      # will ever match it; it cannot vouch for something that was installed.
+      - name: Attest the package
+        if: ${{ !inputs.dry-run }}
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ steps.pack.outputs.nupkg }}
 
       # THE POINT OF NO RETURN, and it comes FIRST. PSGallery does not allow a version to be
       # replaced, only deprecated, so publishing is the one step nothing can take back. The
@@ -362,8 +414,8 @@ jobs:
       # and never precedes it: recorded first, a failed publish would leave the repository
       # asserting a release nobody can install.
       #
-      # Published from the tree cog just committed -- the tree the previous step proved
-      # identical to the commit GitHub built -- so the module carries the new ModuleVersion. A FAILED publish leaves nothing behind -- nothing has been pushed --
+      # The package packed above, byte for byte: `-NupkgPath` publishes a file as it is
+      # rather than packing again, and the gallery serves exactly what it stored. A FAILED publish leaves nothing behind -- nothing has been pushed --
       # and the whole workflow re-runs. A SUCCEEDED one makes a re-run fail here, as the
       # pre-flight tag check does for the tag.
       #
@@ -374,12 +426,10 @@ jobs:
         shell: pwsh
         env:
           PSGALLERY_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
+          NUPKG: ${{ steps.pack.outputs.nupkg }}
         run: |
-          if (-not $env:PSGALLERY_API_KEY) {
-            throw 'PSGALLERY_API_KEY is not set on the release environment. Nothing has been published or pushed; set the secret and re-run.'
-          }
-          Publish-PSResource -Path ./Greenroom -Repository PSGallery -ApiKey $env:PSGALLERY_API_KEY -ErrorAction Stop
-          Write-Host "published $((Import-PowerShellDataFile ./Greenroom/Greenroom.psd1).ModuleVersion) to PSGallery"
+          Publish-PSResource -NupkgPath $env:NUPKG -Repository PSGallery -ApiKey $env:PSGALLERY_API_KEY -ErrorAction Stop
+          Write-Host "published $(Split-Path $env:NUPKG -Leaf) to PSGallery"
 
       # RECORD WHAT WAS PUBLISHED: the tag first, then main.
       #
@@ -414,18 +464,26 @@ jobs:
           fi
           echo "main -> $COMMIT"
 
-      # Last, once the tag exists on the server, and re-runnable by hand. Notes come from the
-      # changelog section cog just generated, so the Release page and CHANGELOG.md cannot
-      # drift apart -- they are the same text.
+      # Last, once the tag exists on the server. Notes come from the changelog section cog
+      # just generated, so the Release page and CHANGELOG.md cannot drift apart -- they are
+      # the same text.
+      #
+      # Draft first, attach the package, publish last. Releases here are immutable, and
+      # publication is where the freeze falls: the tag and the asset cannot change after it.
+      # The asset is the same file the gallery got, so anyone can hash what they were served
+      # and compare it with a copy whose attestation they can check.
       - name: Publish the GitHub Release
         if: ${{ !inputs.dry-run }}
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           TAG: ${{ steps.plan.outputs.next }}
+          NUPKG: ${{ steps.pack.outputs.nupkg }}
         run: |
           set -euo pipefail
           cog changelog --at "$TAG" > /tmp/notes.md
-          gh release create "$TAG" --title "$TAG" --notes-file /tmp/notes.md --verify-tag
+          gh release create "$TAG" --draft --title "$TAG" --notes-file /tmp/notes.md --verify-tag
+          gh release upload "$TAG" "$NUPKG"
+          gh release edit "$TAG" --draft=false
 
       # The build branch has done its job once the commit exists, or failed to. Deleted on
       # every outcome, including a dry run and a failure, so a re-run can create it again.
@@ -442,10 +500,11 @@ jobs:
             echo "### ${{ steps.plan.outputs.next }}"
             echo
             if [ "${{ inputs.dry-run }}" = "true" ]; then
-              echo "Dry run — GitHub constructed and signed \`${{ steps.construct.outputs.sha }}\` on a temporary branch, since deleted. Nothing was published or recorded."
+              echo "Dry run — GitHub constructed and signed \`${{ steps.construct.outputs.sha }}\` on a temporary branch, since deleted, and the module packed. Nothing was attested, published or recorded."
             else
               echo "Released. The tag, the changelog and ModuleVersion moved together."
               echo "From commit \`${{ steps.gate.outputs.sha }}\`, verified green before anything was created, and recorded as \`${{ steps.construct.outputs.sha }}\`, which GitHub constructed and signed."
+              echo "Package sha256 \`${{ steps.pack.outputs.sha256 }}\` — attested, published to the gallery and attached to the release."
               echo
               echo '```powershell'
               echo "Update-PSResource Greenroom     # or Install-PSResource Greenroom -TrustRepository"

@@ -58,6 +58,21 @@ both, but knowing why matters when something is off.
 Then confirm it for yourself — a green line from the installer does not prove the
 things it cannot observe: [docs/troubleshooting.md](docs/troubleshooting.md#did-it-actually-work).
 
+### Verifying where it came from
+
+Each release's package is attested: a signed record, in a public transparency log, of the
+workflow, commit and run that built it. The gallery serves the package exactly as it was
+published, so the file you install can be checked against that record:
+
+```powershell
+Save-PSResource Greenroom -Version <version> -AsNupkg -Path . -TrustRepository
+gh attestation verify .\Greenroom.<version>.nupkg --repo TylerVigario/greenroom-win
+```
+
+The same file is attached to the version's [GitHub Release](https://github.com/TylerVigario/greenroom-win/releases),
+so comparing hashes works without `gh` as well. Releases before attestation was added carry
+no attestation.
+
 ---
 
 ## Scope
