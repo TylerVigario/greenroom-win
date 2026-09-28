@@ -22,8 +22,9 @@ name: Commit convention
 #              exactly what a changelog tool swallows in silence.
 #
 # cocogitto is installed as a PINNED BINARY rather than through its action: one less
-# third-party action to trust, and it pins the exact version the release path will be
-# tested against instead of whatever a floating action tag resolves to that day.
+# third-party action to trust, and it pins the exact bytes the release path will be
+# tested against -- by version and by checksum -- instead of whatever a floating action
+# tag resolves to that day.
 
 on:
   pull_request:
@@ -39,7 +40,12 @@ permissions:
   pull-requests: read
 
 env:
+  # The version names a release asset, and cocogitto's releases are not immutable, so
+  # the file behind a version can be replaced. The checksum names the bytes: a download
+  # that does not match stops the step before cog runs. Bump both together -- the
+  # digest GitHub shows for the x86_64-unknown-linux-musl asset on that release.
   COG_VERSION: '7.0.0'
+  COG_SHA256: 'e03938ff2c4c86d71c00c0f3284dbbe95c5ca76fe34a51f33e945c23010d59bb'
 
 jobs:
   pr-title:
@@ -55,7 +61,9 @@ jobs:
         run: |
           set -euo pipefail
           url="https://github.com/cocogitto/cocogitto/releases/download/${COG_VERSION}/cocogitto-${COG_VERSION}-x86_64-unknown-linux-musl.tar.gz"
-          curl -fsSL "$url" | tar -xz --strip-components=1 -C /usr/local/bin x86_64-unknown-linux-musl/cog
+          curl -fsSL "$url" -o "$RUNNER_TEMP/cog.tar.gz"
+          echo "$COG_SHA256  $RUNNER_TEMP/cog.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/cog.tar.gz" --strip-components=1 -C /usr/local/bin x86_64-unknown-linux-musl/cog
           cog --version
 
       # cog PANICS without a git identity, even when it is only linting a string:
@@ -88,7 +96,9 @@ jobs:
         run: |
           set -euo pipefail
           url="https://github.com/cocogitto/cocogitto/releases/download/${COG_VERSION}/cocogitto-${COG_VERSION}-x86_64-unknown-linux-musl.tar.gz"
-          curl -fsSL "$url" | tar -xz --strip-components=1 -C /usr/local/bin x86_64-unknown-linux-musl/cog
+          curl -fsSL "$url" -o "$RUNNER_TEMP/cog.tar.gz"
+          echo "$COG_SHA256  $RUNNER_TEMP/cog.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/cog.tar.gz" --strip-components=1 -C /usr/local/bin x86_64-unknown-linux-musl/cog
           cog --version
 
       - name: Give git an identity
