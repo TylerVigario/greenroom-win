@@ -262,10 +262,8 @@ jobs:
         id: plan
         env:
           VERSION: ${{ inputs.version }}
-          PSGALLERY_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
         run: |
           set -euo pipefail
-          [ -n "$PSGALLERY_API_KEY" ] || { echo "::error::PSGALLERY_API_KEY is not set on the release environment"; exit 1; }
           cog check
           if [ "$VERSION" = "auto" ]; then
             next=$(cog bump --auto --dry-run)
