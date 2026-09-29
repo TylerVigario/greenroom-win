@@ -37,6 +37,11 @@ Describe 'Switch-GreenroomSession' {
         Mock -ModuleName Greenroom Set-WindowVisible { $true }
         Mock -ModuleName Greenroom Get-WindowFailureReason { 'mocked failure reason' }
         Mock -ModuleName Greenroom Test-WindowVisible { $false }   # actually hidden
+
+        # Pinned, so these tests do not depend on whether the host shell is elevated or has
+        # an instance of that name installed.
+        Mock -ModuleName Greenroom Test-SelfElevated { $true }
+        Mock -ModuleName Greenroom Test-InstanceElevated { $false }
     }
 
     It 'shows a hidden window' {
