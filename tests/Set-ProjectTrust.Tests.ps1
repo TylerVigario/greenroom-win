@@ -120,6 +120,69 @@ Describe 'Set-ProjectTrust' {
         $out = Seed -Existing '{ "somethingElse": 1 }'
         $out | Should -Be '{ "somethingElse": 1 }'
     }
+
+    Context 'what counts as already trusted' {
+        <#
+          The seed must leave the file in the state the post-launch check requires: a
+          "projects" key equal to each path form, case and all, with hasTrustDialogAccepted
+          true. Anything short of that and the hidden session stops at the trust dialog.
+          So each case seeds, then asks Test-TrustSurvived -- the check install runs after
+          launch -- about the result.
+        #>
+
+        It 'seeds a path that appears in the file only as a value elsewhere' {
+            $out = Seed -Existing '{ "githubRepoPaths": { "me/repo": ["C:\\probe-wd"] }, "projects": {} }'
+            BeStrictlyValidJson $out | Should -BeTrue
+            Survived -Existing $out | Should -BeTrue
+            ($out | ConvertFrom-Json).githubRepoPaths.'me/repo' | Should -Be 'C:\probe-wd'
+        }
+
+        It 'accepts trust on an entry that exists with the dialog NOT accepted, keeping its other fields' {
+            $existing = '{ "projects": { ' +
+                '"C:\\probe-wd": { "allowedTools": ["Bash(ls:*)"], "hasTrustDialogAccepted": false, "lastCost": 1.5 }, ' +
+                '"C:/probe-wd": { "hasTrustDialogAccepted": false } } }'
+            $out = Seed -Existing $existing
+            BeStrictlyValidJson $out | Should -BeTrue
+            Survived -Existing $out | Should -BeTrue
+            $e = ($out | ConvertFrom-Json).projects.'C:\probe-wd'
+            $e.allowedTools | Should -Be 'Bash(ls:*)'
+            $e.lastCost | Should -Be 1.5
+        }
+
+        It 'adds the flag to an entry that exists without it' {
+            $out = Seed -Existing '{ "projects": { "C:\\probe-wd": { "allowedTools": [] }, "C:/probe-wd": {} } }'
+            BeStrictlyValidJson $out | Should -BeTrue
+            Survived -Existing $out | Should -BeTrue
+        }
+
+        It 'seeds the exact case when only a different case is present' {
+            # Claude Code keys the literal cwd string; "c:\probe-wd" is not "C:\probe-wd".
+            $out = Seed -Existing '{ "projects": { "c:\\probe-wd": { "hasTrustDialogAccepted": true }, "c:/probe-wd": { "hasTrustDialogAccepted": true } } }'
+            BeStrictlyValidJson $out | Should -BeTrue
+            Survived -Existing $out | Should -BeTrue
+            $out | Should -Match '"c:\\\\probe-wd"'        # the other entry is left alone
+        }
+
+        It 'is not fooled by braces and quotes inside strings, or a "projects" key nested elsewhere' {
+            # The text is walked by token, so structure inside a string is not structure, and
+            # only the TOP-LEVEL "projects" is the projects map.
+            $existing = '{ "cache": { "projects": { "C:\\probe-wd": { "hasTrustDialogAccepted": false } } }, ' +
+                '"note": "a } brace, a \" quote and \"C:\\\\probe-wd\": { in a string", ' +
+                '"projects": { "C:\\probe-wd": { "hasTrustDialogAccepted": false, "x": "}{" } } }'
+            $out = Seed -Existing $existing
+            BeStrictlyValidJson $out | Should -BeTrue
+            Survived -Existing $out | Should -BeTrue
+            $o = $out | ConvertFrom-Json
+            $o.cache.projects.'C:\probe-wd'.hasTrustDialogAccepted | Should -BeFalse   # the decoy is untouched
+            $o.note | Should -Be 'a } brace, a " quote and "C:\\probe-wd": { in a string'
+            $o.projects.'C:\probe-wd'.x | Should -Be '}{'
+        }
+
+        It 'changes nothing when both forms are already trusted' {
+            $existing = '{ "projects": { "C:\\probe-wd": { "hasTrustDialogAccepted": true }, "C:/probe-wd": { "hasTrustDialogAccepted": true } } }'
+            Seed -Existing $existing | Should -Be $existing
+        }
+    }
 }
 
 Describe 'Test-TrustSurvived' {

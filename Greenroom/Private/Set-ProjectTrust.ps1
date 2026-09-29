@@ -56,6 +56,74 @@ function Read-ClaudeProjectMap {
 }
 
 <#
+  Whether a parsed projects map trusts a directory in BOTH path forms: a key equal to
+  each form, case and all, holding an object whose hasTrustDialogAccepted is true. The one
+  definition of "trusted" -- the seed and the post-launch check both use it, so they
+  cannot disagree about what the seed has to achieve.
+#>
+function Test-ProjectMapTrusted {
+    param([System.Collections.IDictionary]$Projects, [Parameter(Mandatory)][string]$Directory)
+    if (-not $Projects) { return $false }
+    foreach ($f in (@($Directory.Replace('/', '\'), $Directory.Replace('\', '/')) | Select-Object -Unique)) {
+        if (-not (Test-ProjectEntryTrusted $Projects $f)) { return $false }
+    }
+    return $true
+}
+
+function Test-ProjectEntryTrusted {
+    param([System.Collections.IDictionary]$Projects, [Parameter(Mandatory)][string]$Key)
+    # Guard the entry as well: a hand-edited project value that is not an object, or is
+    # missing the flag, is "not trusted" rather than a reason to throw indexing into it.
+    if (-not $Projects.ContainsKey($Key)) { return $false }
+    $entry = $Projects[$Key]
+    if ($entry -isnot [System.Collections.IDictionary] -or -not $entry.ContainsKey('hasTrustDialogAccepted')) { return $false }
+    return [bool]$entry['hasTrustDialogAccepted']
+}
+
+<#
+  JSON TEXT, WALKED BY TOKEN. The seed edits ~/.claude.json as text (see Set-ProjectTrust),
+  so it needs to find things in that text exactly: a direct member of one object, never the
+  same characters somewhere else in the file. A regex steps from string to bracket, so the
+  loop runs per token rather than per character, and a brace inside a string is never
+  mistaken for structure.
+#>
+$script:JsonToken = [regex]'"(?:[^"\\]|\\.)*"|[{}\[\]]'
+
+# Index of the bracket closing the object or array that opens at $Open.
+function Find-JsonClose {
+    param([string]$Text, [int]$Open)
+    $depth = 0
+    for ($m = $script:JsonToken.Match($Text, $Open); $m.Success; $m = $m.NextMatch()) {
+        $c = $m.Value[0]
+        if ($c -eq '{' -or $c -eq '[') { $depth++ }
+        elseif ($c -eq '}' -or $c -eq ']') { $depth--; if ($depth -eq 0) { return $m.Index } }
+    }
+    return -1
+}
+
+# The value of the DIRECT member $RawKey (its text between the quotes, escapes and case as
+# written) of the object opening at $Open: @{ Start; End } with End exclusive, or $null.
+function Find-JsonMember {
+    param([string]$Text, [int]$Open, [string]$RawKey)
+    $depth = 0
+    for ($m = $script:JsonToken.Match($Text, $Open); $m.Success; $m = $m.NextMatch()) {
+        $c = $m.Value[0]
+        if ($c -eq '{' -or $c -eq '[') { $depth++; continue }
+        if ($c -eq '}' -or $c -eq ']') { $depth--; if ($depth -eq 0) { return $null }; continue }
+        if ($depth -ne 1) { continue }
+        $colon = ([regex]'\G\s*:\s*').Match($Text, $m.Index + $m.Length)
+        if (-not $colon.Success -or $m.Value.Substring(1, $m.Value.Length - 2) -cne $RawKey) { continue }
+        $start = $colon.Index + $colon.Length
+        if ($Text[$start] -eq '{' -or $Text[$start] -eq '[') {
+            return @{ Start = $start; End = (Find-JsonClose $Text $start) + 1 }
+        }
+        $scalar = ([regex]'\G(?:"(?:[^"\\]|\\.)*"|[^,}\]\s]+)').Match($Text, $start)
+        return @{ Start = $start; End = $start + $scalar.Length }
+    }
+    return $null
+}
+
+<#
   Seed Claude Code's trust for a working directory, so the session does not stop at a
   modal trust dialog inside a window nobody can see.
 
@@ -91,29 +159,63 @@ function Set-ProjectTrust {
     Copy-Item $file $backup -Force
 
     $raw = Get-Content $file -Raw
-    $m = [regex]::Match($raw, '"projects"\s*:\s*\{')
-    if (-not $m.Success) {
+    # WHAT IS TRUSTED IS DECIDED FROM THE PARSED FILE, the way Claude Code reads it: a
+    # "projects" key equal to the path form, case and all, with the flag true. Searching
+    # the text for the quoted path was not that. It found the path as a value elsewhere
+    # (githubRepoPaths), found an entry whose dialog was never accepted, and found another
+    # case of the same path -- and skipped the seed each time, leaving a hidden session at
+    # the trust dialog.
+    try { $projects = Read-ClaudeProjectMap $raw }
+    catch {
+        Write-Warning "~/.claude.json does not parse ($($_.Exception.Message)) -- leaving it untouched"
+        return $false
+    }
+    $root = $raw.IndexOf('{')
+    $span = if ($root -ge 0) { Find-JsonMember $raw $root 'projects' }
+    if (-not $projects -or -not $span -or $raw[$span.Start] -ne '{') {
         Write-Warning 'no "projects" block in ~/.claude.json -- skipping trust seed'
         return $false
     }
-    $insertAt = $m.Index + $m.Length
 
     $targets = @($Directory.Replace('/', '\'), $Directory.Replace('\', '/')) | Select-Object -Unique
     $seeded = $false
     foreach ($t in $targets) {
+        if (Test-ProjectEntryTrusted $projects $t) { continue }
         $jsonKey = $t.Replace('\', '\\')
-        if ($raw -match [regex]::Escape('"' + $jsonKey + '"')) { continue }
+        # Offsets move with every edit, so the projects object is found afresh each pass.
+        $open  = (Find-JsonMember $raw $root 'projects').Start
+        $entry = Find-JsonMember $raw $open $jsonKey
 
-        # An EMPTY projects object takes no trailing comma. Inserting one after the `{`
-        # of `"projects": {}` produces `{ "x": {...},}`, which Node -- the parser that
-        # actually reads this file -- rejects outright, taking Claude Code with it.
-        #
-        # Recomputed each pass, because after the first entry the object is no longer
-        # empty and the second one does need its comma.
-        $isEmpty = $raw.Substring($insertAt) -match '^\s*\}'
-        $comma = if ($isEmpty) { '' } else { ',' }
+        if ($entry -and $raw[$entry.Start] -eq '{') {
+            # The entry exists -- `claude` was run here once and the dialog never accepted.
+            # Accept it in place and leave everything else in the entry alone.
+            $flag = Find-JsonMember $raw $entry.Start 'hasTrustDialogAccepted'
+            if ($flag) {
+                $raw = $raw.Substring(0, $flag.Start) + 'true' + $raw.Substring($flag.End)
+            }
+            else {
+                $emptyEntry = $raw.Substring($entry.Start + 1) -match '^\s*\}'
+                $raw = $raw.Substring(0, $entry.Start + 1) + ' "hasTrustDialogAccepted": true' +
+                       $(if ($emptyEntry) { ' ' } else { ',' }) + $raw.Substring($entry.Start + 1)
+            }
+        }
+        elseif ($entry) {
+            Write-Warning "~/.claude.json holds a project entry for '$t' that is not an object -- leaving it untouched"
+            return $false
+        }
+        else {
+            $insertAt = $open + 1
 
-        $entry = @"
+            # An EMPTY projects object takes no trailing comma. Inserting one after the `{`
+            # of `"projects": {}` produces `{ "x": {...},}`, which Node -- the parser that
+            # actually reads this file -- rejects outright, taking Claude Code with it.
+            #
+            # Recomputed each pass, because after the first entry the object is no longer
+            # empty and the second one does need its comma.
+            $isEmpty = $raw.Substring($insertAt) -match '^\s*\}'
+            $comma = if ($isEmpty) { '' } else { ',' }
+
+            $newEntry = @"
 
     "$jsonKey": {
       "allowedTools": [],
@@ -128,7 +230,8 @@ function Set-ProjectTrust {
       "exampleFiles": []
     }$comma
 "@
-        $raw = $raw.Substring(0, $insertAt) + $entry + $raw.Substring($insertAt)
+            $raw = $raw.Substring(0, $insertAt) + $newEntry + $raw.Substring($insertAt)
+        }
         $seeded = $true
     }
 
@@ -144,6 +247,11 @@ function Set-ProjectTrust {
     # keys this file can carry. The edition-aware helper is strict and case-tolerant on both.)
     if (-not (Test-ClaudeJsonValid $raw)) {
         Write-Warning 'refusing to write ~/.claude.json -- the seeded result was not valid JSON'
+        return $false
+    }
+    # And it must be what the post-launch check will ask for. Written only if it is.
+    if (-not (Test-ProjectMapTrusted (Read-ClaudeProjectMap $raw) $Directory)) {
+        Write-Warning 'refusing to write ~/.claude.json -- the seeded result would still not trust the directory'
         return $false
     }
 
@@ -178,17 +286,7 @@ function Test-TrustSurvived {
     $raw = try { Get-Content $file -Raw -ErrorAction Stop } catch { return $false }
     $projects = try { Read-ClaudeProjectMap $raw }
                 catch { Write-Warning "~/.claude.json did not parse while verifying trust for '$Directory': $($_.Exception.Message)"; return $false }
-    if (-not $projects) { return $false }
-
-    # Guard the entry as well: a hand-edited project value that is not an object, or is
-    # missing the flag, is "not trusted" rather than a reason to throw indexing into it.
-    foreach ($f in (@($Directory.Replace('/', '\'), $Directory.Replace('\', '/')) | Select-Object -Unique)) {
-        if (-not $projects.ContainsKey($f)) { return $false }
-        $entry = $projects[$f]
-        if ($entry -isnot [System.Collections.IDictionary] -or -not $entry.ContainsKey('hasTrustDialogAccepted')) { return $false }
-        if (-not $entry['hasTrustDialogAccepted']) { return $false }
-    }
-    return $true
+    return (Test-ProjectMapTrusted $projects $Directory)
 }
 
 <#
