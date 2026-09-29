@@ -374,4 +374,4 @@ It refuses to write `~/.claude.json` at all if the result would not parse as JSO
 **This is the only file outside greenroom's own directories that installing writes.**
 `-NoTrustSeed` declines it entirely — run `claude` once in the working directory and
 accept the dialog yourself, and greenroom then touches nothing but
-`~\.local\bin\greenroom` and `~\.claude\greenroom\<instance>`.
+`~\.claude\greenroom\<instance>`.
