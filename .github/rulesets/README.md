@@ -84,7 +84,9 @@ revisit if more actors ever hold a bypass.
 The exemption belongs to the **actor**, not to `release.yml`: anything that can
 mint the App's token can push to `main` unreviewed. That is why
 `RELEASE_APP_CLIENT_ID` and `RELEASE_APP_PRIVATE_KEY` live on the `release`
-environment — required reviewer, limited to `main` — rather than repository-wide.
+environment — limited to `main` — rather than repository-wide. The environment has no
+required reviewer while one person maintains the repository; add one when a contributor
+holds write access.
 
 To push by hand instead, set `enforcement` to `disabled` first — a deliberate,
 visible act rather than a standing exemption.
