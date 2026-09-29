@@ -262,13 +262,8 @@ jobs:
         id: plan
         env:
           VERSION: ${{ inputs.version }}
-          # Whether the key is set, never the key: this step runs cog, and the one step
-          # that needs the key's value is the publish. The expression is evaluated by the
-          # runner service, so only `true` or `false` reaches this step.
-          HAS_GALLERY_KEY: ${{ secrets.PSGALLERY_API_KEY != '' }}
         run: |
           set -euo pipefail
-          [ "$HAS_GALLERY_KEY" = "true" ] || { echo "::error::PSGALLERY_API_KEY is not set on the release environment"; exit 1; }
           cog check
           if [ "$VERSION" = "auto" ]; then
             next=$(cog bump --auto --dry-run)
