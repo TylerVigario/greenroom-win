@@ -142,21 +142,14 @@ Describe 'Uninstall-GreenroomInstance with a name that is not an instance' {
     }
 
     It 'refuses <Name> before doing anything' -ForEach @(
-        @{ Name = '..' }, @{ Name = '.' }, @{ Name = '*' }, @{ Name = 'pro*' }, @{ Name = '..\outer' }
+        @{ Name = '..' }, @{ Name = '.' }, @{ Name = '*' }, @{ Name = 'pro*' }, @{ Name = '..\outer' },
+        # A trailing dot is dropped by Windows, so 'probe.' would BE probe's directory.
+        @{ Name = 'probe.' }
     ) {
         { Uninstall-GreenroomInstance -Name $Name -Confirm:$false } | Should -Throw -ErrorId 'ParameterArgumentValidationError*'
         Test-Path (Join-Path $script:Outer 'sentinel.txt') | Should -BeTrue
         Test-Path (Join-Path $script:Root 'probe')  | Should -BeTrue
         Test-Path (Join-Path $script:Root 'second') | Should -BeTrue
-        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 0 -Exactly
-    }
-
-    It 'refuses a trailing dot, which Windows resolves to another instance' {
-        # 'probe.' passes the pattern; Windows drops the dot, so its path IS probe's directory.
-        Uninstall-GreenroomInstance -Name 'probe.' -Confirm:$false -ErrorVariable err -ErrorAction SilentlyContinue | Out-Null
-        $err.Count | Should -Be 1
-        "$($err[0])" | Should -Match 'does not name its own directory'
-        Test-Path (Join-Path $script:Root 'probe') | Should -BeTrue
         Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 0 -Exactly
     }
 

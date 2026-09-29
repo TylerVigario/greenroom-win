@@ -170,6 +170,35 @@ Describe 'Install-GreenroomInstance' {
         # of a task name, so spaces and oddities are refused at the parameter.
         { Install-GreenroomInstance -Name 'has space' -ErrorAction Stop } | Should -Throw
         { Install-GreenroomInstance -Name '-startsdash' -ErrorAction Stop } | Should -Throw
+        # Windows drops a trailing dot from a path, so 'probe.' would read and write
+        # probe's state directory.
+        { Install-GreenroomInstance -Name 'probe.' -ErrorAction Stop } | Should -Throw -ErrorId 'ParameterArgumentValidationError*'
+    }
+
+    It 'names instances by the same rule Uninstall- enforces' {
+        # The name becomes a directory Uninstall- deletes recursively; a name one command
+        # accepts and the other refuses is an instance that cannot be removed, or worse.
+        $pattern = { param($cmd) ((Get-Command $cmd).Parameters['Name'].Attributes |
+            Where-Object { $_ -is [ValidatePattern] }).RegexPattern }
+        & $pattern Install-GreenroomInstance | Should -Be (& $pattern Uninstall-GreenroomInstance)
+    }
+
+    It 'accepts <Name>' -ForEach @(
+        @{ Name = 'a' }, @{ Name = 'a.b' }, @{ Name = 'a-' }, @{ Name = 'a_' }, @{ Name = 'v1.2' },
+        @{ Name = 'x' * 32 }
+    ) {
+        $rx = ((Get-Command Install-GreenroomInstance).Parameters['Name'].Attributes |
+            Where-Object { $_ -is [ValidatePattern] }).RegexPattern
+        $Name | Should -Match $rx
+    }
+
+    It 'refuses <Name>' -ForEach @(
+        @{ Name = 'probe.' }, @{ Name = 'a..' }, @{ Name = '.a' }, @{ Name = '-a' }, @{ Name = 'x' * 33 },
+        @{ Name = 'has space' }, @{ Name = '..' }, @{ Name = '*' }
+    ) {
+        $rx = ((Get-Command Install-GreenroomInstance).Parameters['Name'].Attributes |
+            Where-Object { $_ -is [ValidatePattern] }).RegexPattern
+        $Name | Should -Not -Match $rx
     }
 
     It 'supports ShouldProcess' {
