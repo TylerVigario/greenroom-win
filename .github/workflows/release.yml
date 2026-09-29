@@ -59,9 +59,9 @@ name: Release
 #      If the App was REPLACED rather than moved, its App ID changed with it, so step 4
 #      and both environment secrets belong to whichever App the ruleset now names.
 #   3. A `release` environment on the repository — limited to the `main` branch, no
-#      required reviewer (see above) — carrying RELEASE_APP_CLIENT_ID, RELEASE_APP_PRIVATE_KEY and
-#      PSGALLERY_API_KEY as ENVIRONMENT secrets, not repository secrets, per the
-#      paragraph above.
+#      required reviewer (see above) — carrying RELEASE_APP_CLIENT_ID,
+#      RELEASE_APP_PRIVATE_KEY and PSGALLERY_API_KEY as ENVIRONMENT secrets, not
+#      repository secrets, per the paragraph above.
 #      The Client ID is NOT the App ID. The Client ID is the `Iv23li...` value and goes
 #      in the secret; the App ID is the number beside it and goes in the ruleset.
 #      PSGALLERY_API_KEY comes from powershellgallery.com -> your account -> API Keys.
