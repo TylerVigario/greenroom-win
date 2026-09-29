@@ -50,6 +50,10 @@ function Uninstall-GreenroomInstance {
     param(
         [Parameter(Mandatory, Position = 0, ValueFromPipeline, ValueFromPipelineByPropertyName)]
         [Alias('Instance')]
+        # The same rule Install- enforces. The name becomes a path that is deleted
+        # recursively, so anything install could never have created is refused here:
+        # `..` would name ~/.claude itself, and `*` every instance's state at once.
+        [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$')]
         [string]$Name,
 
         [switch]$KeepState
@@ -57,15 +61,27 @@ function Uninstall-GreenroomInstance {
 
     process {
         $task     = "greenroom-$Name"
-        $stateDir = Join-Path (Get-GreenroomStateRoot) $Name
+        $root     = Get-GreenroomStateRoot
+        $stateDir = Join-Path $root $Name
         $esc      = [regex]::Escape($Name)
+
+        # The pattern is not the whole guarantee. Windows drops trailing dots from a path,
+        # so `probe.` passes it and still resolves to probe's directory. Before anything
+        # is touched, the directory must resolve to exactly <state root>\<Name>.
+        $full = [IO.Path]::GetFullPath($stateDir)
+        if ((Split-Path $full -Parent) -ne [IO.Path]::GetFullPath($root).TrimEnd('\') -or
+            (Split-Path $full -Leaf) -ne $Name) {
+            Write-Error -Category InvalidArgument -Message ("'$Name' does not name its own directory under " +
+                "$root -- it resolves to $full. Nothing was removed.")
+            return
+        }
 
         # Read the config BEFORE anything is removed. config.json lives inside the state
         # directory, so reading it afterwards always returns $null.
         $cfg = Get-InstanceConfig -Name $Name
 
         $taskExists = [bool](Get-ScheduledTask -TaskPath '\' -TaskName $task -ErrorAction Ignore)
-        if (-not $taskExists -and -not (Test-Path $stateDir)) {
+        if (-not $taskExists -and -not (Test-Path -LiteralPath $stateDir)) {
             Write-Error -Category ObjectNotFound -Message "'$Name' is not installed: no task '$task' and no state directory."
             return
         }
@@ -92,8 +108,8 @@ function Uninstall-GreenroomInstance {
         if ($KeepState) {
             Write-Verbose "state kept: $stateDir"
         }
-        elseif (Test-Path $stateDir) {
-            Remove-Item $stateDir -Recurse -Force
+        elseif (Test-Path -LiteralPath $stateDir) {
+            Remove-Item -LiteralPath $stateDir -Recurse -Force
             $stateRemoved = $true
             Write-Verbose "state removed: $stateDir"
         }
