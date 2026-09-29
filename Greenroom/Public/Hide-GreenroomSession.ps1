@@ -44,6 +44,8 @@ function Hide-GreenroomSession {
     process {
         # Same order as Show-GreenroomSession, and for the same reasons: resolve, then
         # escalate, then gate, then act. See that function for why each step sits here.
+        # Elevation first: an elevated session cannot be found from an unelevated shell.
+        if (Invoke-ElevationFirst -Name $Name -Command 'Hide-GreenroomSession' -NoElevate:$NoElevate -Cmdlet $PSCmdlet) { return }
         $target = Resolve-GreenroomTarget -Name $Name -RequireWindow
         if (-not $target) { return }
 

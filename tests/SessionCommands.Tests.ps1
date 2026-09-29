@@ -32,6 +32,10 @@ Describe 'Show-GreenroomSession / Hide-GreenroomSession' {
         Mock -ModuleName Greenroom Assert-CanActOnInstance { $true }
         Mock -ModuleName Greenroom Set-WindowVisible { $true }
         Mock -ModuleName Greenroom Get-WindowFailureReason { 'mocked failure reason' }
+        # Pinned, so these tests do not depend on whether the host shell is elevated or has
+        # an instance of that name installed.
+        Mock -ModuleName Greenroom Test-SelfElevated { $true }
+        Mock -ModuleName Greenroom Test-InstanceElevated { $false }
     }
 
     It 'shows the window with Show = true' {
@@ -93,6 +97,72 @@ Describe 'Show-GreenroomSession / Hide-GreenroomSession' {
     It 'processes every item piped in' {
         'a', 'b', 'c' | Show-GreenroomSession
         Should -Invoke -ModuleName Greenroom Set-WindowVisible -Times 3 -Exactly
+    }
+}
+
+Describe 'Show-, Hide- and Switch- on an elevated instance from an unelevated shell' {
+    <#
+      From an unelevated shell the elevated session is invisible to discovery: its command
+      line reads as NULL, so Resolve-GreenroomTarget finds nothing by name. These must go
+      elevated BEFORE looking, deciding from the installed instance.
+    #>
+    BeforeEach {
+        Mock -ModuleName Greenroom Test-SelfElevated { $false }
+        Mock -ModuleName Greenroom Test-InstanceElevated { $Name -eq 'admin' }
+        Mock -ModuleName Greenroom Get-RegisteredInstanceName { 'admin' }
+        Mock -ModuleName Greenroom Invoke-ElevatedSelf { [PSCustomObject]@{ ExitCode = 0; Records = @() } }
+        # What discovery really returns from here: nothing for that name.
+        Mock -ModuleName Greenroom Resolve-GreenroomTarget { Write-Error "no greenroom session named '$Name' is running." }
+        Mock -ModuleName Greenroom Set-WindowVisible { $true }
+        Mock -ModuleName Greenroom Test-WindowVisible { $false }
+    }
+
+    It '<Cmd> escalates instead of reporting the session missing' -ForEach @(
+        @{ Cmd = 'Show-GreenroomSession' }, @{ Cmd = 'Hide-GreenroomSession' }, @{ Cmd = 'Switch-GreenroomSession' }
+    ) {
+        & $Cmd -Name admin -ErrorVariable err -ErrorAction SilentlyContinue
+        $err | Should -BeNullOrEmpty
+        Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 1 -Exactly `
+            -ParameterFilter { $Command -eq $Cmd -and $Name -eq 'admin' }
+        Should -Invoke -ModuleName Greenroom Resolve-GreenroomTarget -Times 0
+        Should -Invoke -ModuleName Greenroom Set-WindowVisible -Times 0
+    }
+
+    It 'escalates for the only registered instance when no name is given' {
+        Show-GreenroomSession -ErrorVariable err -ErrorAction SilentlyContinue
+        $err | Should -BeNullOrEmpty
+        Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 1 -Exactly -ParameterFilter { $Name -eq 'admin' }
+    }
+
+    It 'refuses under -NoElevate, and escalates nothing' {
+        Show-GreenroomSession -Name admin -NoElevate -ErrorVariable err -ErrorAction SilentlyContinue
+        "$err" | Should -Match 'runs ELEVATED'
+        Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 0
+    }
+
+    It 'escalates nothing under -WhatIf' {
+        Show-GreenroomSession -Name admin -WhatIf
+        Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 0
+        Should -Invoke -ModuleName Greenroom Set-WindowVisible -Times 0
+    }
+
+    It 'goes the usual way for an instance that is not elevated' {
+        Mock -ModuleName Greenroom Resolve-GreenroomTarget {
+            [PSCustomObject]@{ PSTypeName = 'Greenroom.Instance'; Instance = 'plain'; Window = [IntPtr]::new(7) }
+        }
+        Show-GreenroomSession -Name plain
+        Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 0
+        Should -Invoke -ModuleName Greenroom Set-WindowVisible -Times 1 -Exactly
+    }
+
+    It 'goes the usual way from an elevated shell' {
+        Mock -ModuleName Greenroom Test-SelfElevated { $true }
+        Mock -ModuleName Greenroom Resolve-GreenroomTarget {
+            [PSCustomObject]@{ PSTypeName = 'Greenroom.Instance'; Instance = 'admin'; Window = [IntPtr]::new(7) }
+        }
+        Show-GreenroomSession -Name admin
+        Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 0
+        Should -Invoke -ModuleName Greenroom Set-WindowVisible -Times 1 -Exactly
     }
 }
 

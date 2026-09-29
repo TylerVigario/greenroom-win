@@ -298,3 +298,40 @@ function Assert-CanActOnInstance {
     }
     return $false
 }
+
+<#
+  For Show-, Hide- and Switch-: go elevated BEFORE looking for the session, when the
+  instance runs elevated and this shell does not.
+
+  Those commands find their target among running processes, and from here an elevated
+  claude.exe cannot be found: its command line reads as NULL across the integrity
+  boundary, so it is listed as '(unreadable)' and a lookup by name finds nothing. The
+  escalation after the lookup was therefore never reached -- the command failed with "not
+  running" instead of raising UAC. Whether to elevate is decided from the INSTALLED
+  instance instead, as Stop- and Restart- already do: the name given, or the only one
+  registered when none is.
+
+  Returns $true when it has dealt with the call (escalated, refused under -NoElevate, or
+  declined under ShouldProcess) and the caller must stop; $false when the caller carries on.
+#>
+function Invoke-ElevationFirst {
+    # ShouldProcess is the CALLER's, passed in as -Cmdlet, so -WhatIf and -Confirm on Show-,
+    # Hide- and Switch- govern the escalation. Declaring its own would answer a question nobody
+    # asked this private helper.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSShouldProcess', '')]
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [AllowEmptyString()][string]$Name,
+        [Parameter(Mandatory)][string]$Command,
+        [switch]$NoElevate,
+        [Parameter(Mandatory)][System.Management.Automation.PSCmdlet]$Cmdlet
+    )
+    if (Test-SelfElevated) { return $false }
+    $n = if ($Name) { $Name } else { $r = @(Get-RegisteredInstanceName); if ($r.Count -eq 1) { $r[0] } }
+    if (-not $n -or [System.Management.Automation.WildcardPattern]::ContainsWildcardCharacters($n)) { return $false }
+    if (-not (Test-InstanceElevated -Name $n)) { return $false }
+    if (-not $Cmdlet.ShouldProcess($n, $Command)) { return $true }
+    [void](Assert-CanActOnInstance -Name $n -Command $Command -NoElevate:$NoElevate)
+    return $true
+}

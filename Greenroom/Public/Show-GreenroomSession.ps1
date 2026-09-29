@@ -53,6 +53,8 @@ function Show-GreenroomSession {
     process {
         # Resolve first: validation must precede ShouldProcess, or -WhatIf would report
         # that it would show a window for an instance that is not even running.
+        # Elevation first: an elevated session cannot be found from an unelevated shell.
+        if (Invoke-ElevationFirst -Name $Name -Command 'Show-GreenroomSession' -NoElevate:$NoElevate -Cmdlet $PSCmdlet) { return }
         $target = Resolve-GreenroomTarget -Name $Name -RequireWindow
         if (-not $target) { return }
 

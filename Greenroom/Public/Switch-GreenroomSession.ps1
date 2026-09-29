@@ -57,6 +57,8 @@ function Switch-GreenroomSession {
     process {
         # Resolve, escalate, gate, act -- the same order as Show- and Hide-, for the
         # reasons documented on Show-GreenroomSession.
+        # Elevation first: an elevated session cannot be found from an unelevated shell.
+        if (Invoke-ElevationFirst -Name $Name -Command 'Switch-GreenroomSession' -NoElevate:$NoElevate -Cmdlet $PSCmdlet) { return }
         $target = Resolve-GreenroomTarget -Name $Name -RequireWindow
         if (-not $target) { return }
 
