@@ -82,6 +82,32 @@ function Resolve-InstallParameter {
     }
     if (-not $WorkingDirectory) { $WorkingDirectory = Join-Path $env:USERPROFILE $Name }
 
+    # STORED AS THE LAUNCHER WILL LAND. The launcher enters this directory, then compares
+    # where it landed with this string and exits on any difference -- so 'C:/x', '.\x' or
+    # '~\x' crash-looped the hidden session on every start: the landed path is always a
+    # full Windows path. Resolved here the way the operator meant it: '~' and a relative
+    # path against this shell, not against the task's folder at logon.
+    #
+    # Case is kept and a working path comes back unchanged. That matters: Claude Code files
+    # an instance's memory under the literal working-directory string, so rewriting a path
+    # that already works would orphan it. A rooted path goes through GetFullPath rather
+    # than the PowerShell resolver, which refuses a drive that is not mounted right now.
+    $asTyped = $WorkingDirectory
+    $WorkingDirectory = if ([IO.Path]::IsPathRooted($WorkingDirectory) -and -not $WorkingDirectory.StartsWith('~')) {
+        [IO.Path]::GetFullPath($WorkingDirectory)
+    } else {
+        [IO.Path]::GetFullPath($PSCmdlet.GetUnresolvedProviderPathFromPSPath($WorkingDirectory))
+    }
+    if ($WorkingDirectory.Length -gt 3) { $WorkingDirectory = $WorkingDirectory.TrimEnd([char]92) }
+    if ($WorkingDirectory -ne $asTyped) { Write-Verbose "working directory '$asTyped' stored as '$WorkingDirectory'" }
+
+    # Never the home directory itself: Claude Code does not persist trust for it, so the
+    # trust dialog repeats forever and Remote Control never connects.
+    if ($WorkingDirectory -eq $env:USERPROFILE.TrimEnd([char]92)) {
+        throw ("-WorkingDirectory: '$asTyped' is the home directory, and Remote Control will not connect " +
+               "from one -- its trust dialog repeats forever. Use a directory inside it, e.g. $(Join-Path $env:USERPROFILE $Name).")
+    }
+
     # Elevation inherits like the rest, but ANNOUNCES itself every time rather than
     # only under -Verbose, because it is security-relevant.
     if (-not $Bound.ContainsKey('Elevated') -and $prev -and $prev.elevated) {
