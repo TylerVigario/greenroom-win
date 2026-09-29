@@ -35,10 +35,17 @@ function Invoke-ElevatedSelf {
     [OutputType('Greenroom.ElevatedRun')]
     param(
         [Parameter(Mandatory)][string]$Command,
-        [Parameter(Mandatory)][string[]]$Name
+        [Parameter(Mandatory)][string[]]$Name,
+        # Switches the elevated copy must also get -- Uninstall's -KeepState, which would
+        # otherwise be dropped and the state it asked to keep deleted. Letters only: each
+        # is written into the command line as -<name>. Not called -Switch: that is the
+        # automatic variable of a `switch` statement, and a caller running inside one would
+        # see its enumerator wherever the parameter is not bound.
+        [ValidatePattern('^[A-Za-z]+$')][string[]]$Forward = @()
     )
 
     $list = ($Name | ForEach-Object { "'$_'" }) -join ', '
+    $switches = ($Forward | ForEach-Object { " -$_" }) -join ''
     Write-Warning "$list $(if ($Name.Count -eq 1) { 'runs' } else { 'run' }) elevated and this shell does not. Re-launching elevated..."
 
     # Single-quoted inside the -Command string so nothing is re-interpreted by the
@@ -96,7 +103,7 @@ function Invoke-ElevatedSelf {
         "`$ErrorActionPreference='Stop';",
         "try {",
         "  Import-Module '$manifest' -Force; `$ev = `$null;",
-        "  `$r = @($safeNames | $Command -NoElevate -Confirm:`$false -ErrorAction Continue -ErrorVariable ev 3>&1 2>&1);",
+        "  `$r = @($safeNames | $Command -NoElevate$switches -Confirm:`$false -ErrorAction Continue -ErrorVariable ev 3>&1 2>&1);",
         "  try {",
         "    `$r | ForEach-Object {",
         "      if (`$_ -is [System.Management.Automation.WarningRecord]) { [pscustomobject]@{ GreenroomStream = 'Warning'; Message = [string]`$_.Message } }",
@@ -119,7 +126,7 @@ function Invoke-ElevatedSelf {
         catch {
             # The usual cause is the UAC prompt being dismissed, which is a decision rather
             # than a fault, so it is reported as one.
-            throw "elevation declined or failed -- $list $(if ($Name.Count -eq 1) { 'was' } else { 'were' }) not changed. To do it by hand, from an elevated shell: $list | $Command"
+            throw "elevation declined or failed -- $list $(if ($Name.Count -eq 1) { 'was' } else { 'were' }) not changed. To do it by hand, from an elevated shell: $list | $Command$switches"
         }
 
         # Absent is not an error in itself: a child that died before exporting leaves no
@@ -208,12 +215,16 @@ function Invoke-DeferredElevation {
     param(
         [Parameter(Mandatory)][string]$Command,
         [Parameter(Mandatory)][string[]]$Name,
-        [Parameter(Mandatory)][System.Management.Automation.PSCmdlet]$Cmdlet
+        [Parameter(Mandatory)][System.Management.Automation.PSCmdlet]$Cmdlet,
+        [string[]]$Forward = @()
     )
 
     # A NEW record, not the caught one re-written: that would keep its origin, and name
     # Invoke-ElevatedSelf to the operator instead of the command they typed.
-    try { $run = Invoke-ElevatedSelf -Command $Command -Name $Name }
+    # Only when there is one: an empty list arrives as $null, which -Forward's pattern refuses.
+    $extra = @{}
+    if ($Forward) { $extra.Forward = $Forward }
+    try { $run = Invoke-ElevatedSelf -Command $Command -Name $Name @extra }
     catch {
         $Cmdlet.WriteError([System.Management.Automation.ErrorRecord]::new(
             [System.OperationCanceledException]::new($_.Exception.Message, $_.Exception),
