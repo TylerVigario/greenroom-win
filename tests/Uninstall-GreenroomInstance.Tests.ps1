@@ -115,3 +115,55 @@ Describe 'Uninstall-GreenroomInstance' {
         Should -Invoke -ModuleName Greenroom Unregister-ScheduledTask -Times 2 -Exactly
     }
 }
+
+Describe 'Uninstall-GreenroomInstance with a name that is not an instance' {
+    <#
+      The name becomes a path that is deleted recursively. These run against a state root
+      nested one level inside the test's own temp directory, beside a sentinel file, so a
+      traversal that got through would hit the sentinel -- never the real ~/.claude.
+    #>
+
+    BeforeEach {
+        $script:Outer = Join-Path $script:StateRoot 'outer'
+        $script:Root  = Join-Path $script:Outer 'greenroom'
+        New-Item -ItemType Directory -Path (Join-Path $script:Root 'probe') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $script:Root 'second') -Force | Out-Null
+        Set-Content (Join-Path $script:Outer 'sentinel.txt') 'must survive'
+
+        Mock -ModuleName Greenroom Get-GreenroomStateRoot { $script:Root }
+        Mock -ModuleName Greenroom Get-ScheduledTask { }
+        Mock -ModuleName Greenroom Stop-ScheduledTask { }
+        Mock -ModuleName Greenroom Unregister-ScheduledTask { }
+        Mock -ModuleName Greenroom Stop-VerifiedProcess { 0 }
+    }
+
+    AfterEach {
+        if (Test-Path $script:Outer) { Remove-Item $script:Outer -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'refuses <Name> before doing anything' -ForEach @(
+        @{ Name = '..' }, @{ Name = '.' }, @{ Name = '*' }, @{ Name = 'pro*' }, @{ Name = '..\outer' }
+    ) {
+        { Uninstall-GreenroomInstance -Name $Name -Confirm:$false } | Should -Throw -ErrorId 'ParameterArgumentValidationError*'
+        Test-Path (Join-Path $script:Outer 'sentinel.txt') | Should -BeTrue
+        Test-Path (Join-Path $script:Root 'probe')  | Should -BeTrue
+        Test-Path (Join-Path $script:Root 'second') | Should -BeTrue
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 0 -Exactly
+    }
+
+    It 'refuses a trailing dot, which Windows resolves to another instance' {
+        # 'probe.' passes the pattern; Windows drops the dot, so its path IS probe's directory.
+        Uninstall-GreenroomInstance -Name 'probe.' -Confirm:$false -ErrorVariable err -ErrorAction SilentlyContinue | Out-Null
+        $err.Count | Should -Be 1
+        "$($err[0])" | Should -Match 'does not name its own directory'
+        Test-Path (Join-Path $script:Root 'probe') | Should -BeTrue
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 0 -Exactly
+    }
+
+    It 'still removes a real instance, and only it' {
+        Uninstall-GreenroomInstance -Name probe -Confirm:$false | Out-Null
+        Test-Path (Join-Path $script:Root 'probe')  | Should -BeFalse
+        Test-Path (Join-Path $script:Root 'second') | Should -BeTrue
+        Test-Path (Join-Path $script:Outer 'sentinel.txt') | Should -BeTrue
+    }
+}
