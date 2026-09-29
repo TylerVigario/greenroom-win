@@ -212,7 +212,9 @@ function Save-SessionWindow {
     Log "window capture: handle $($owned[0]) on WindowsTerminal pid $wtPid"
 }
 
-$titlePattern = [regex]::Escape($Instance) + '$'
+# Exactly "<glyph> <instance>" -- see Test-SessionTitle.ps1 next door. Anything looser
+# closes windows that are not this instance's: "admin" once matched "<glyph> laptop-admin".
+. (Join-Path $PSScriptRoot 'Test-SessionTitle.ps1')
 
 function Close-StaleWindows {
     # Same EnumWindowsProc lParam as above.
@@ -221,7 +223,7 @@ function Close-StaleWindows {
     param()
 
     $script:staleHits = @()
-    $script:stalePattern = $titlePattern
+    $script:staleInstance = $Instance
     $cb = [GreenroomWd.Win1+EnumWindowsProc] {
         param($h, $l)
         $sb = New-Object System.Text.StringBuilder 256
@@ -229,7 +231,7 @@ function Close-StaleWindows {
         if ($sb.ToString() -match 'CASCADIA_HOSTING') {
             $tb = New-Object System.Text.StringBuilder 512
             [GreenroomWd.Win1]::GetWindowText($h, $tb, 512) | Out-Null
-            if ($tb.ToString() -match $script:stalePattern) {
+            if (Test-SessionTitle -Title $tb.ToString() -Instance $script:staleInstance) {
                 $script:staleHits += [PSCustomObject]@{ Handle = $h; Title = $tb.ToString() }
             }
         }
