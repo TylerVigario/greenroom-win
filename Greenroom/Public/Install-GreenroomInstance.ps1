@@ -25,9 +25,10 @@
   Register-ScheduledTask instead would leave an instance half-built.
 
 .PARAMETER Name
-  1-32 characters, letters/digits/dot/dash/underscore, starting alphanumeric. No
-  spaces: it goes on a command line, is matched back out of one, and becomes part of a
-  scheduled-task name.
+  1-32 characters, letters/digits/dot/dash/underscore, starting alphanumeric and not
+  ending in a dot. No spaces: it goes on a command line, is matched back out of one, and
+  becomes part of a scheduled-task name. No trailing dot: Windows drops it from a path,
+  so 'probe.' would read and write probe's state.
 
 .PARAMETER WorkingDirectory
   Where the session runs. Omitted, it inherits from the previous install; on a first
@@ -99,7 +100,7 @@ function Install-GreenroomInstance {
         # every instance without changing any of their settings.
         [Parameter(Mandatory, Position = 0, ValueFromPipeline, ValueFromPipelineByPropertyName)]
         [Alias('Instance')]
-        [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$')]
+        [ValidatePattern('^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,30}[A-Za-z0-9_-])?$')]
         [string]$Name,
 
         [string]$WorkingDirectory,

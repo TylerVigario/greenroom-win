@@ -163,7 +163,7 @@ the module path.
 
 | Parameter | |
 |---|---|
-| `-Name` | required; 1–32 chars, letters/digits/`.`/`-`/`_`, **no spaces** |
+| `-Name` | required; 1–32 chars, letters/digits/`.`/`-`/`_`, not ending in `.`, **no spaces** |
 | `-WorkingDirectory` | inherited on a re-run; `%USERPROFILE%\<name>` on a first install |
 | `-AdditionalDirectories` | per-instance grants, **default none** |
 | `-TriggerDelay` | logon delay, default `PT1M` |

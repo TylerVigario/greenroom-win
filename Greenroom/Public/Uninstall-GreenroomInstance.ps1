@@ -53,7 +53,7 @@ function Uninstall-GreenroomInstance {
         # The same rule Install- enforces. The name becomes a path that is deleted
         # recursively, so anything install could never have created is refused here:
         # `..` would name ~/.claude itself, and `*` every instance's state at once.
-        [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$')]
+        [ValidatePattern('^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,30}[A-Za-z0-9_-])?$')]
         [string]$Name,
 
         [switch]$KeepState
@@ -65,9 +65,9 @@ function Uninstall-GreenroomInstance {
         $stateDir = Join-Path $root $Name
         $esc      = [regex]::Escape($Name)
 
-        # The pattern is not the whole guarantee. Windows drops trailing dots from a path,
-        # so `probe.` passes it and still resolves to probe's directory. Before anything
-        # is touched, the directory must resolve to exactly <state root>\<Name>.
+        # The pattern refuses the one quirk known to matter -- Windows drops a trailing dot,
+        # so `probe.` would resolve to probe's directory -- but this deletes recursively, so
+        # the resolved path is checked as well: exactly <state root>\<Name>, or nothing.
         $full = [IO.Path]::GetFullPath($stateDir)
         if ((Split-Path $full -Parent) -ne [IO.Path]::GetFullPath($root).TrimEnd('\') -or
             (Split-Path $full -Leaf) -ne $Name) {
