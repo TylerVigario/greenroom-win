@@ -25,9 +25,14 @@ name: Release
 # tree and not what a new workflow reads.
 #
 # That is why the secrets live on the `release` ENVIRONMENT rather than repo-wide, and why
-# this job names it below. The environment carries a required reviewer, so a run stalls
-# until a human approves before it can mint the token, and it is limited to `main`, so a
-# modified release.yml dispatched from a branch cannot reach the secrets at all.
+# this job names it below. The environment is limited to `main`, so a modified release.yml
+# dispatched from a branch cannot reach the secrets at all.
+#
+# It carries NO required reviewer, deliberately. While one person maintains the repository,
+# anyone able to start a run on main is that person, so an approval step asks them to
+# approve themselves -- a click, not a gate. Revisit when a contributor holds write access:
+# from then on a reviewer on this environment is what stands between their dispatch and the
+# secrets.
 #
 # What that does NOT contain: the bypass is `always`, which GitHub applies to every rule in
 # the ruleset rather than only the pull-request one — so the App could in principle also
@@ -53,8 +58,8 @@ name: Release
 #      GET /repos/<owner>/<repo>/installation. Re-install on the new owner.
 #      If the App was REPLACED rather than moved, its App ID changed with it, so step 4
 #      and both environment secrets belong to whichever App the ruleset now names.
-#   3. A `release` environment on the repository — required reviewer, limited to the
-#      `main` branch — carrying RELEASE_APP_CLIENT_ID, RELEASE_APP_PRIVATE_KEY and
+#   3. A `release` environment on the repository — limited to the `main` branch, no
+#      required reviewer (see above) — carrying RELEASE_APP_CLIENT_ID, RELEASE_APP_PRIVATE_KEY and
 #      PSGALLERY_API_KEY as ENVIRONMENT secrets, not repository secrets, per the
 #      paragraph above.
 #      The Client ID is NOT the App ID. The Client ID is the `Iv23li...` value and goes
@@ -104,10 +109,9 @@ env:
 jobs:
   release:
     runs-on: ubuntu-latest
-    # The App secrets live on the `release` environment, behind a required reviewer, so this
-    # job pauses for approval before it can mint the App token -- a job must name the
-    # environment to read its secrets. The environment also restricts deployments to `main`,
-    # so a release.yml dispatched from a branch cannot reach the secrets at all.
+    # The App secrets live on the `release` environment -- a job must name the environment to
+    # read its secrets. The environment restricts deployments to `main`, so a release.yml
+    # dispatched from a branch cannot reach the secrets at all.
     environment: release
     # The attestation is signed with this run's OIDC identity and stored on the repository;
     # those are the two things the job needs beyond reading. Everything that writes to the
