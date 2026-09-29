@@ -122,6 +122,52 @@ Describe 'Resolve-InstallParameter' {
         }
     }
 
+    Context 'the working directory is stored as the launcher will land' {
+        <#
+          The launcher compares where it landed with the stored string and exits on any
+          difference, and it always lands on a full Windows path. So anything else stored
+          here crash-loops the hidden session on every start.
+        #>
+
+        It 'stores <Typed> as a full Windows path' -ForEach @(
+            @{ Typed = 'C:/work/foo';  Want = 'C:\work\foo' }
+            @{ Typed = 'C:/work/foo/'; Want = 'C:\work\foo' }
+            @{ Typed = 'C:\work\foo\'; Want = 'C:\work\foo' }
+            @{ Typed = 'D:/not-mounted/x'; Want = 'D:\not-mounted\x' }
+        ) {
+            (Resolve -Bound @{ WorkingDirectory = $true } -Extra @{ WorkingDirectory = $Typed }).WorkingDirectory |
+                Should -Be $Want
+        }
+
+        It 'resolves ~ against the home directory' {
+            (Resolve -Bound @{ WorkingDirectory = $true } -Extra @{ WorkingDirectory = '~/gr-probe' }).WorkingDirectory |
+                Should -Be (Join-Path $env:USERPROFILE 'gr-probe')
+        }
+
+        It 'resolves a relative path against this shell, not the task folder' {
+            Push-Location $script:WorkDir
+            try {
+                (Resolve -Bound @{ WorkingDirectory = $true } -Extra @{ WorkingDirectory = '.\sub' }).WorkingDirectory |
+                    Should -Be (Join-Path $script:WorkDir 'sub')
+            }
+            finally { Pop-Location }
+        }
+
+        It 'leaves a working path exactly as it was, case and all' {
+            # Claude Code files memory under the literal string; changing it orphans it.
+            WritePrevConfig @{ workingDirectory = 'C:\Users\X\Desktop-Admin' }
+            (Resolve).WorkingDirectory | Should -BeExactly 'C:\Users\X\Desktop-Admin'
+        }
+
+        It 'refuses the home directory, <Typed>' -ForEach @(
+            @{ Typed = '~' }, @{ Typed = '~/' }, @{ Typed = 'HOME' }
+        ) {
+            $wd = if ($Typed -eq 'HOME') { $env:USERPROFILE } else { $Typed }
+            { Resolve -Bound @{ WorkingDirectory = $true } -Extra @{ WorkingDirectory = $wd } } |
+                Should -Throw '*is the home directory*'
+        }
+    }
+
     Context 'refusals' {
 
         It 'refuses when the previous config exists but will not parse and anything was omitted' {
