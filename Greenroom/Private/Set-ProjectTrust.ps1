@@ -174,10 +174,6 @@ function Set-ProjectTrust {
         return $false
     }
 
-    if (-not (Test-Path $BackupDir)) { New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null }
-    $backup = Join-Path $BackupDir ('claude.json.backup-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
-    Copy-Item $file $backup -Force
-
     $raw = Read-Utf8File $file
     # WHAT IS TRUSTED IS DECIDED FROM THE PARSED FILE, the way Claude Code reads it: a
     # "projects" key equal to the path form, case and all, with the flag true. Searching
@@ -275,10 +271,26 @@ function Set-ProjectTrust {
         return $false
     }
 
+    # BACKED UP ONLY WHEN WRITTEN, and only the last few kept. It used to copy the whole
+    # file on every install and update -- including every one that found trust already in
+    # place and wrote nothing -- and never removed a copy: one instance had 12, going back
+    # months. The copy is taken immediately before the write, so it is the file as it was
+    # when it was replaced.
+    if (-not (Test-Path $BackupDir)) { New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null }
+    $backup = Join-Path $BackupDir ('claude.json.backup-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    Copy-Item $file $backup -Force
+    # The names sort by time. Only this instance's own backups are touched.
+    Get-ChildItem -LiteralPath $BackupDir -Filter 'claude.json.backup-*' -File |
+        Sort-Object Name -Descending | Select-Object -Skip $script:TrustBackupsKept |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+
     Write-Utf8File $file $raw
     Write-Verbose "trust seeded (backup at $backup)"
     return $true
 }
+
+# How many copies of ~/.claude.json an instance keeps from before its trust seeds wrote it.
+$script:TrustBackupsKept = 5
 
 <#
   Whether trust for a directory is present RIGHT NOW, in both path forms.

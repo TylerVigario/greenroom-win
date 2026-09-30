@@ -288,3 +288,56 @@ Describe 'Claude Code files keep their encoding' {
         ([IO.File]::ReadAllText($file, $script:Utf8) | ConvertFrom-Json).permissions.additionalDirectories | Should -BeExactly $grant
     }
 }
+
+Describe 'Trust backups' {
+    <#
+      A copy of ~/.claude.json is kept from before each write, and only the last five. It
+      used to be copied on every install and update, written or not, and never removed.
+    #>
+    BeforeAll {
+        function NewHome([string]$Json) {
+            $h = Join-Path $script:Sandbox ([guid]::NewGuid())
+            New-Item -ItemType Directory -Path (Join-Path $h 'state') -Force | Out-Null
+            Set-Content (Join-Path $h 'state\config.json') '{}'
+            [IO.File]::WriteAllText((Join-Path $h '.claude.json'), $Json, [Text.UTF8Encoding]::new($false))
+            $h
+        }
+        function SeedIn([string]$h, [string]$Directory = 'C:\probe-wd') {
+            InModuleScope Greenroom -Parameters @{ h = $h; d = $Directory } {
+                param($h, $d); $env:USERPROFILE = $h
+                Set-ProjectTrust -Directory $d -BackupDir (Join-Path $h 'state') | Out-Null
+            }
+        }
+        function Backups([string]$h) { @(Get-ChildItem (Join-Path $h 'state') -Filter 'claude.json.backup-*' | Sort-Object Name) }
+    }
+    BeforeEach { $script:RealProfile = $env:USERPROFILE }
+    AfterEach  { $env:USERPROFILE = $script:RealProfile }
+
+    It 'copies nothing when trust is already in place' {
+        $h = NewHome '{ "projects": { "C:\\probe-wd": { "hasTrustDialogAccepted": true }, "C:/probe-wd": { "hasTrustDialogAccepted": true } } }'
+        SeedIn $h
+        (Backups $h).Count | Should -Be 0
+    }
+
+    It 'keeps one copy of the file as it was before the write' {
+        $before = '{ "numStartups": 7, "projects": {} }'
+        $h = NewHome $before
+        SeedIn $h
+        $b = Backups $h
+        $b.Count | Should -Be 1
+        [IO.File]::ReadAllText($b[0].FullName) | Should -BeExactly $before
+    }
+
+    It 'keeps only the five most recent, and nothing else in the folder is touched' {
+        $h = NewHome '{ "projects": {} }'
+        foreach ($d in 1..7) { Set-Content (Join-Path $h "state\claude.json.backup-2026010$d-000000") "old $d" }
+        SeedIn $h
+        $names = (Backups $h).Name
+        $names.Count | Should -Be 5
+        $names | Should -Not -Contain 'claude.json.backup-20260101-000000'
+        $names | Should -Not -Contain 'claude.json.backup-20260102-000000'
+        $names | Should -Not -Contain 'claude.json.backup-20260103-000000'
+        $names | Should -Contain 'claude.json.backup-20260107-000000'
+        Test-Path (Join-Path $h 'state\config.json') | Should -BeTrue
+    }
+}
