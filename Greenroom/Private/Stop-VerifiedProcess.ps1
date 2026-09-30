@@ -79,6 +79,28 @@ function Test-StopTarget {
 }
 
 <#
+  The command-line pattern of a shell running one of greenroom's scripts for an instance:
+  greenroom-watchdog.ps1 or greenroom-launch.ps1, run as `-File <path>\<script> -Instance
+  <name>` -- the one shape greenroom starts them with, the watchdog from its .vbs and the
+  launcher from the watchdog, the path quoted when it holds a space.
+
+  The exact shape, not `<script>.*-Instance <name>`: that matched any shell whose command
+  line merely MENTIONED the script and, anywhere after it, -Instance with the name -- a
+  one-off `-Command` reading the script or its log, say -- and Stop, Restart and Uninstall
+  killed it as the instance's watchdog or launcher.
+#>
+function Get-InstanceScriptPattern {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$Script,
+        [Parameter(Mandatory)][string]$Name
+    )
+    $s = [regex]::Escape($Script)
+    '-File\s+(?:"(?:[^"]*\\)?' + $s + '"|(?:[^"\s]*\\)?' + $s + ')\s+-Instance\s+"?' + [regex]::Escape($Name) + '("|\s|$)'
+}
+
+<#
   Whether this process is running INSIDE the named instance's session.
 
   Walks up the ancestry looking for the claude.exe that owns this shell. Restarting an

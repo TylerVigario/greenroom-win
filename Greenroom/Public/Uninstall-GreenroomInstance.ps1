@@ -74,7 +74,6 @@ function Uninstall-GreenroomInstance {
         $task     = "greenroom-$Name"
         $root     = Get-GreenroomStateRoot
         $stateDir = Join-Path $root $Name
-        $esc      = [regex]::Escape($Name)
 
         # The pattern refuses the one quirk known to matter -- Windows drops a trailing dot,
         # so `probe.` would resolve to probe's directory -- but this deletes recursively, so
@@ -127,9 +126,9 @@ function Uninstall-GreenroomInstance {
         }
 
         $shells   = 'pwsh.exe', 'powershell.exe'
-        $watchdog = Stop-VerifiedProcess -ProcessName $shells      -Pattern ('greenroom-watchdog.*-Instance\s+"?' + $esc + '("|\s|$)') -Label 'watchdog'
-        $session  = Stop-VerifiedProcess -ProcessName 'claude.exe' -SessionOf $Name                                                       -Label 'session'
-        $launcher = Stop-VerifiedProcess -ProcessName $shells      -Pattern ('greenroom-launch.*-Instance\s+"?' + $esc + '("|\s|$)')   -Label 'launcher'
+        $watchdog = Stop-VerifiedProcess -ProcessName $shells      -Pattern (Get-InstanceScriptPattern -Script 'greenroom-watchdog.ps1' -Name $Name) -Label 'watchdog'
+        $session  = Stop-VerifiedProcess -ProcessName 'claude.exe' -SessionOf $Name                                                                  -Label 'session'
+        $launcher = Stop-VerifiedProcess -ProcessName $shells      -Pattern (Get-InstanceScriptPattern -Script 'greenroom-launch.ps1' -Name $Name)   -Label 'launcher'
 
         $stateRemoved = $false
         if ($KeepState) {

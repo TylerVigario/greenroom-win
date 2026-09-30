@@ -106,6 +106,42 @@ Describe 'Stop-VerifiedProcess' {
         }
     }
 
+    Context 'the pattern for a greenroom script' {
+        # Only a shell running the script for the instance, in the one shape greenroom
+        # starts it -- never one whose command line merely mentions both.
+        It 'matches <Why>' -ForEach @(
+            @{ Why = 'the watchdog as its .vbs starts it'; Script = 'greenroom-watchdog.ps1'; Name = 'laptop-admin'
+               Cmd = '"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "C:\Users\x\Documents\PowerShell\Modules\Greenroom\0.7.0\Assets\greenroom-watchdog.ps1" -Instance "laptop-admin"' }
+            @{ Why = 'the launcher as the watchdog starts it'; Script = 'greenroom-launch.ps1'; Name = 'laptop-admin'
+               Cmd = 'pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File C:\Users\x\Documents\PowerShell\Modules\Greenroom\0.7.0\Assets\greenroom-launch.ps1 -Instance laptop-admin' }
+            @{ Why = 'a launcher path quoted for its space'; Script = 'greenroom-launch.ps1'; Name = 'laptop-admin'
+               Cmd = 'pwsh.exe -NoLogo -File "C:\Users\Jane Doe\Documents\PowerShell\Modules\Greenroom\0.7.0\Assets\greenroom-launch.ps1" -Instance laptop-admin' }
+            @{ Why = 'a name ending in a dash'; Script = 'greenroom-watchdog.ps1'; Name = 'render-'
+               Cmd = 'pwsh.exe -File C:\m\Assets\greenroom-watchdog.ps1 -Instance "render-"' }
+            @{ Why = 'a name ending in a dot'; Script = 'greenroom-launch.ps1'; Name = 'v1.'
+               Cmd = 'powershell.exe -File C:\m\Assets\greenroom-launch.ps1 -Instance v1.' }
+        ) {
+            $p = InModuleScope Greenroom -Parameters @{ s = $Script; n = $Name } { param($s, $n) Get-InstanceScriptPattern -Script $s -Name $n }
+            $Cmd | Should -Match $p
+        }
+
+        It 'does not match <Why>' -ForEach @(
+            @{ Why = 'a shell that only mentions the script and the instance'; Script = 'greenroom-watchdog.ps1'; Name = 'laptop-admin'
+               Cmd = 'pwsh.exe -Command "Get-Content C:\m\Assets\greenroom-watchdog.ps1 | Select-String Instance; Get-GreenroomInstance -Instance laptop-admin"' }
+            @{ Why = 'a shell reading the launcher before naming the instance'; Script = 'greenroom-launch.ps1'; Name = 'laptop-admin'
+               Cmd = 'pwsh.exe -Command "code C:\m\Assets\greenroom-launch.ps1; Restart-GreenroomSession -Instance laptop-admin"' }
+            @{ Why = 'another instance sharing the prefix'; Script = 'greenroom-watchdog.ps1'; Name = 'render-'
+               Cmd = 'pwsh.exe -File C:\m\Assets\greenroom-watchdog.ps1 -Instance "render-two"' }
+            @{ Why = 'another script whose name ends the same'; Script = 'greenroom-watchdog.ps1'; Name = 'laptop-admin'
+               Cmd = 'pwsh.exe -File C:\m\my-greenroom-watchdog.ps1 -Instance laptop-admin' }
+            @{ Why = 'the other greenroom script'; Script = 'greenroom-launch.ps1'; Name = 'laptop-admin'
+               Cmd = 'pwsh.exe -File C:\m\Assets\greenroom-watchdog.ps1 -Instance laptop-admin' }
+        ) {
+            $p = InModuleScope Greenroom -Parameters @{ s = $Script; n = $Name } { param($s, $n) Get-InstanceScriptPattern -Script $s -Name $n }
+            $Cmd | Should -Not -Match $p
+        }
+    }
+
     It 'stops and counts a real process' {
         $marker = 'gr-stop-probe-' + [guid]::NewGuid().ToString('N')
         $shell = (Get-Process -Id $PID).Path
