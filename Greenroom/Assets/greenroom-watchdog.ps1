@@ -34,15 +34,9 @@ $stateDir = Join-Path $env:USERPROFILE ".claude\greenroom\$Instance"
 if (-not (Test-Path $stateDir)) { New-Item -ItemType Directory -Path $stateDir -Force | Out-Null }
 $log = Join-Path $stateDir 'watchdog.log'
 
-function Log($m) {
-    "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff')  $m" | Add-Content -Path $log -Encoding UTF8
-    # keep the log from growing without bound across months of uptime
-    $item = Get-Item $log -ErrorAction SilentlyContinue
-    if ($item -and $item.Length -gt 512KB) {
-        $tail = Get-Content $log -Tail 500
-        Set-Content -Path $log -Value $tail -Encoding UTF8
-    }
-}
+# Bounded, like the launcher's -- see Write-InstanceLog.ps1 next door.
+. (Join-Path $PSScriptRoot 'Write-InstanceLog.ps1')
+function Log($m) { Write-InstanceLog -Path $log -Message $m }
 
 # SINGLE-INSTANCE GUARD.
 #

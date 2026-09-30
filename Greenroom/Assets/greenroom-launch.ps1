@@ -19,9 +19,10 @@ $stateDir = Join-Path $env:USERPROFILE ".claude\greenroom\$Instance"
 if (-not (Test-Path $stateDir)) { New-Item -ItemType Directory -Path $stateDir -Force | Out-Null }
 $log = Join-Path $stateDir 'launch.log'
 
-function Log($m) {
-    "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff')  $m" | Add-Content -Path $log -Encoding UTF8
-}
+# Bounded, like the watchdog's -- see Write-InstanceLog.ps1 next door. It used not to be,
+# and a crash loop writes here on every restart.
+. (Join-Path $PSScriptRoot 'Write-InstanceLog.ps1')
+function Log($m) { Write-InstanceLog -Path $log -Message $m }
 
 Log "--- launcher start, pid $PID, instance '$Instance' ---"
 
