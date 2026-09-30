@@ -31,6 +31,11 @@
 .PARAMETER KeepState
   Leave the state directory (config, window record, logs) in place.
 
+.PARAMETER NoElevate
+  Refuse rather than re-launch elevated when the instance runs elevated and this shell
+  does not. Without it, every elevated instance named is removed by ONE elevated run at
+  the end, under one UAC prompt, and -KeepState goes with it.
+
 .OUTPUTS
   Greenroom.UninstallResult -- what was actually removed, as data rather than prose.
 
@@ -56,8 +61,14 @@ function Uninstall-GreenroomInstance {
         [ValidatePattern('^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,30}[A-Za-z0-9_-])?$')]
         [string]$Name,
 
-        [switch]$KeepState
+        [switch]$KeepState,
+
+        [switch]$NoElevate
     )
+
+    begin {
+        $deferred = [System.Collections.Generic.List[string]]::new()
+    }
 
     process {
         $task     = "greenroom-$Name"
@@ -87,6 +98,22 @@ function Uninstall-GreenroomInstance {
         }
 
         if (-not $PSCmdlet.ShouldProcess($Name, 'Uninstall-GreenroomInstance')) { return }
+
+        # The guards Stop- and Restart- have. Uninstalling the session this shell runs inside
+        # kills its own ancestor part-way through, after the task is gone, leaving the state
+        # half-removed.
+        if (Test-SelfIsInstance -Name $Name) {
+            Write-Error -Category InvalidOperation -Message (
+                "'$Name' is the session this shell is running inside. Uninstalling it from here would kill " +
+                'this process part-way through and leave it half-removed. Run it from a shell outside the session.')
+            return
+        }
+        # An elevated instance's processes cannot be seen or stopped from an unelevated shell,
+        # and its task cannot be unregistered -- the state would go while the watchdog lived on
+        # and crash-looped for want of its config. It is removed by one elevated run instead.
+        if (-not (Assert-CanActOnInstance -Name $Name -Command 'Uninstall-GreenroomInstance' -NoElevate:$NoElevate -Defer $deferred)) {
+            return
+        }
 
         # The task first. Its trigger would otherwise be free to start a replacement
         # watchdog while the kills below are still running.
@@ -125,6 +152,13 @@ function Uninstall-GreenroomInstance {
             LauncherStopped  = $launcher
             StateRemoved     = $stateRemoved
             WorkingDirectory = if ($cfg) { $cfg.workingDirectory } else { $null }
+        }
+    }
+
+    end {
+        if ($deferred.Count) {
+            $carry = if ($KeepState) { @('KeepState') } else { @() }
+            Invoke-DeferredElevation -Command 'Uninstall-GreenroomInstance' -Name $deferred -Cmdlet $PSCmdlet -Forward $carry
         }
     }
 }
