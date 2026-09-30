@@ -212,6 +212,8 @@ function Save-SessionWindow {
     Log "window capture: handle $($owned[0]) on WindowsTerminal pid $wtPid"
 }
 
+. (Join-Path $PSScriptRoot 'Format-ProcessArgument.ps1')
+
 # Exactly "<glyph> <instance>" -- see Test-SessionTitle.ps1 next door. Anything looser
 # closes windows that are not this instance's: "admin" once matched "<glyph> laptop-admin".
 . (Join-Path $PSScriptRoot 'Test-SessionTitle.ps1')
@@ -261,8 +263,11 @@ function Start-RcSession {
     # down could appear as "new" in the comparison.
     $script:windowsBefore = Get-CascadiaHandleSet
     # -w new forces its own window instead of a tab in an existing terminal.
+    # Quoted, because Start-Process quotes nothing: a shell or launcher path with a space
+    # in it -- a profile name, a OneDrive Documents folder -- otherwise arrives in pieces
+    # and the session never starts. See Format-ProcessArgument.ps1 next door.
     $args_ = @('-w', 'new', $shell, '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass',
-               '-File', $inner, '-Instance', $Instance)
+               '-File', $inner, '-Instance', $Instance) | Format-ProcessArgument
     Start-Process -FilePath $wt -ArgumentList $args_ -WindowStyle Hidden
     Log 'launched WT session (hidden)'
 }
