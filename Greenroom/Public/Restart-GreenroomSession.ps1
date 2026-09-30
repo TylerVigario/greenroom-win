@@ -118,7 +118,7 @@ function Restart-GreenroomSession {
             $shells = 'pwsh.exe', 'powershell.exe'
             $killed =
                 (Stop-VerifiedProcess -ProcessName $shells      -Pattern ('greenroom-watchdog.*-Instance\s+"?' + $esc + '("|\s|$)') -Label 'watchdog') +
-                (Stop-VerifiedProcess -ProcessName 'claude.exe' -Pattern ('--remote-control\s+"?' + $esc + '("|\s|$)')                 -Label 'session')  +
+                (Stop-VerifiedProcess -ProcessName 'claude.exe' -SessionOf $n                                                          -Label 'session')  +
                 (Stop-VerifiedProcess -ProcessName $shells      -Pattern ('greenroom-launch.*-Instance\s+"?' + $esc + '("|\s|$)')   -Label 'launcher')
 
             if ($killed -eq 0) { Write-Verbose "nothing was running for '$n'" }
