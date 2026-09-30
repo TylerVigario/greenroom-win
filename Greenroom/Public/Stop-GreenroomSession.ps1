@@ -136,12 +136,11 @@ function Stop-GreenroomSession {
             # they run. This only ends a task currently executing; it does not disable it.
             Stop-ScheduledTask -TaskName "greenroom-$n" -ErrorAction SilentlyContinue
 
-            $esc    = [regex]::Escape($n)
             $shells = 'pwsh.exe', 'powershell.exe'
 
-            $watchdog = Stop-VerifiedProcess -ProcessName $shells      -Pattern ('greenroom-watchdog.*-Instance\s+"?' + $esc + '("|\s|$)') -Label 'watchdog'
-            $session  = Stop-VerifiedProcess -ProcessName 'claude.exe' -SessionOf $n                                                          -Label 'session'
-            $launcher = Stop-VerifiedProcess -ProcessName $shells      -Pattern ('greenroom-launch.*-Instance\s+"?' + $esc + '("|\s|$)')   -Label 'launcher'
+            $watchdog = Stop-VerifiedProcess -ProcessName $shells      -Pattern (Get-InstanceScriptPattern -Script 'greenroom-watchdog.ps1' -Name $n) -Label 'watchdog'
+            $session  = Stop-VerifiedProcess -ProcessName 'claude.exe' -SessionOf $n                                                                  -Label 'session'
+            $launcher = Stop-VerifiedProcess -ProcessName $shells      -Pattern (Get-InstanceScriptPattern -Script 'greenroom-launch.ps1' -Name $n)   -Label 'launcher'
 
             if (($watchdog + $session + $launcher) -eq 0) { Write-Verbose "nothing was running for '$n'" }
 
