@@ -335,3 +335,20 @@ Describe 'Model' {
         }
     }
 }
+
+Describe 'Resolve-GreenroomShell' {
+    # The shell greenroom starts things in -- the watchdog, the session, the elevated
+    # relaunch. pwsh 7 where there is one; Windows PowerShell 5.1, which every Windows host
+    # has, where there is not.
+
+    It 'prefers pwsh 7 when it is installed' {
+        Mock -ModuleName Greenroom Test-Path { $true }
+        InModuleScope Greenroom { Resolve-GreenroomShell } | Should -BeLike '*\pwsh.exe'
+    }
+
+    It 'falls back to Windows PowerShell 5.1 when there is no pwsh 7' {
+        Mock -ModuleName Greenroom Test-Path { $Path -like '*\WindowsPowerShell\v1.0\powershell.exe' }
+        Mock -ModuleName Greenroom Get-Command { $null } -ParameterFilter { $Name -eq 'pwsh.exe' }
+        InModuleScope Greenroom { Resolve-GreenroomShell } | Should -Be (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe')
+    }
+}
