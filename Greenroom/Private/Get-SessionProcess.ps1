@@ -1,8 +1,17 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Tyler Vigario
 
+# Which claude.exe are greenroom's own. Lives in Assets/ because the watchdog needs the same
+# answer and cannot reach Private/; the module does not load Assets/ on its own.
+. (Join-Path $script:GreenroomModuleRoot 'Assets\Get-GreenroomSessionName.ps1')
+
 <#
-  Every running greenroom session on this host, as process records.
+  Every running greenroom session on this host, as process records -- greenroom's OWN.
+
+  A claude.exe is one only if greenroom started it: see Get-GreenroomSessionName. Any
+  claude.exe can carry "--remote-control <name>", so the name alone listed sessions greenroom
+  never started -- a Remote Control session run by hand, as though it were an instance, and
+  one run with the unrelated --remote-control-session-name-prefix flag as "(unnamed)".
 
   Anchors on claude.exe itself rather than on a launcher. Two earlier approaches
   failed: matching pwsh by command line also matched shells that merely MENTIONED
@@ -22,10 +31,14 @@ function Get-SessionProcess {
     $all = @(Get-CimInstance Win32_Process -Filter "Name='claude.exe'" -ErrorAction SilentlyContinue -Verbose:$false |
              Where-Object { $_.ProcessId -ne $PID })
 
-    foreach ($p in ($all | Where-Object { $_.CommandLine -match '--remote-control' })) {
-        $name = '(unnamed)'
-        if ($p.CommandLine -match '--remote-control\s+"?([^"\s-][^"\s]*)') { $name = $Matches[1] }
-        [PSCustomObject]@{ Instance = $name; Claude = $p; Pid = $p.ProcessId; Opaque = $false }
+    foreach ($p in ($all | Where-Object { $_.CommandLine })) {
+        $name = Get-GreenroomSessionName -ClaudeProc $p
+        if ($name) {
+            [PSCustomObject]@{ Instance = $name; Claude = $p; Pid = $p.ProcessId; Opaque = $false }
+        }
+        elseif ($p.CommandLine -match '--remote-control') {
+            Write-Verbose "claude.exe pid $($p.ProcessId) uses Remote Control but greenroom did not start it -- not listed"
+        }
     }
 
     # MEASURED on the reference host: Win32_Process.CommandLine comes back NULL for any
