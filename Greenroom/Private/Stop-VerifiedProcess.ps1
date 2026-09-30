@@ -40,7 +40,20 @@ function Stop-VerifiedProcess {
             Write-Verbose "skipped pid $($p.ProcessId) -- no longer matches $Label"
             continue
         }
-        Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+        # Counted only if it is gone. SilentlyContinue with an unconditional count reported a
+        # refused kill -- access denied, a process at a higher integrity level -- as a stop,
+        # so the "what was actually stopped" results said so of something still running.
+        # One that exits on its own while this runs is gone all the same, and counts.
+        # -ErrorVariable rather than try/catch: it collects the error whether the cmdlet
+        # raised it as terminating or not.
+        Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue -ErrorVariable failed
+        if ($failed) {
+            $still = Get-CimInstance Win32_Process -Filter "ProcessId=$($p.ProcessId)" -ErrorAction SilentlyContinue -Verbose:$false
+            if ($still -and $still.CommandLine -match $Pattern) {
+                Write-Warning "could not stop $Label (pid $($p.ProcessId)): $($failed[0])"
+                continue
+            }
+        }
         Write-Verbose "stopped $Label (pid $($p.ProcessId))"
         $stopped++
     }
