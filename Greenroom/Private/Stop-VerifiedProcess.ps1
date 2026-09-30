@@ -86,18 +86,21 @@ function Test-StopTarget {
   so the restart never reaches Start-ScheduledTask and the instance is left DOWN rather
   than restarted -- and running it from inside the session is the most natural way to
   invoke it, which is exactly what makes the trap worth a guard.
+
+  Only greenroom's own session counts -- see Get-GreenroomSessionName. Stop, Restart and
+  Uninstall kill only that one, so running them from inside a Remote Control session started
+  by hand under the same name kills no ancestor, and refusing there refused for nothing.
 #>
 function Test-SelfIsInstance {
     [CmdletBinding()]
     [OutputType([bool])]
     param([Parameter(Mandatory)][string]$Name)
 
-    $esc = [regex]::Escape($Name)
     $ancestor = $PID
     for ($hop = 0; $hop -lt 8 -and $ancestor; $hop++) {
         $p = Get-CimInstance Win32_Process -Filter "ProcessId=$ancestor" -ErrorAction SilentlyContinue -Verbose:$false
         if (-not $p) { return $false }
-        if ($p.Name -eq 'claude.exe' -and $p.CommandLine -match ('--remote-control\s+"?' + $esc + '("|\s|$)')) { return $true }
+        if ($p.Name -eq 'claude.exe' -and (Get-GreenroomSessionName -ClaudeProc $p) -eq $Name) { return $true }
         $ancestor = $p.ParentProcessId
     }
     return $false
