@@ -20,10 +20,12 @@
   Windows Terminal is required rather than conhost: conhost does no font
   fallback, and no console-registerable font contains the glyphs the TUI draws.
 
-  MULTI-INSTANCE: every process lookup is filtered on '--remote-control <name>'
-  so several instances can be supervised on one host without stealing each
-  other's sessions. A watchdog that matched bare '--remote-control' would adopt
-  whichever session it saw first and then fight the other watchdog over it.
+  OWNERSHIP: the watchdog adopts only its own instance's session -- one greenroom's
+  launcher started for this instance. See Get-GreenroomSessionName.ps1 next door.
+  Several instances can then be supervised on one host without stealing each other's
+  sessions, and a Remote Control session started by hand under the same name is left
+  alone: matching on the name alone adopted it, stopped starting the real session, and
+  handed the instance to a process greenroom does not control.
 #>
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$Instance)
@@ -88,15 +90,16 @@ $shell   = $cfg.shell
 $inner   = Join-Path $PSScriptRoot 'greenroom-launch.ps1'
 $POLL_MS = 1000
 
-# Anchored so 'admin' cannot match an instance called 'admin-2'.
-$cmdPattern = '--remote-control\s+"?' + [regex]::Escape($Instance) + '("|\s|$)'
-
 Log "=== watchdog start, pid $PID, instance '$Instance' ==="
 Log "     cwd=$($cfg.workingDirectory)  claude=$($cfg.claudeExe)"
 
+# Whether a claude.exe is greenroom's session, and of which instance -- see
+# Get-GreenroomSessionName.ps1 next door. The module asks the same question the same way.
+. (Join-Path $PSScriptRoot 'Get-GreenroomSessionName.ps1')
+
 function Get-RcClaudePid {
     $p = Get-CimInstance Win32_Process -Filter "Name='claude.exe'" -ErrorAction SilentlyContinue |
-         Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match $cmdPattern } |
+         Where-Object { $_.ProcessId -ne $PID -and (Get-GreenroomSessionName -ClaudeProc $_) -eq $Instance } |
          Select-Object -First 1
     if ($p) { $p.ProcessId } else { $null }
 }
