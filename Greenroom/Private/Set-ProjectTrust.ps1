@@ -56,6 +56,26 @@ function Read-ClaudeProjectMap {
 }
 
 <#
+  CLAUDE CODE'S FILES ARE UTF-8 WITHOUT A BOM, and are read and written that way here,
+  through .NET, on both editions. Windows PowerShell 5.1's Get-Content reads a BOM-less
+  file as ANSI, and its Set-Content -Encoding UTF8 writes a BOM. MEASURED on 5.1: seeding
+  trust turned "cafe" with an accent, CJK and an emoji in ~/.claude.json into mojibake,
+  wrote a BOM in front of the file, and a trust key under a non-ASCII path could never
+  match. pwsh 7 did neither. ReadAllText still honours a BOM if one is already there.
+#>
+$script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+
+function Read-Utf8File {
+    param([Parameter(Mandatory)][string]$Path)
+    [System.IO.File]::ReadAllText($Path, $script:Utf8NoBom)
+}
+
+function Write-Utf8File {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][AllowEmptyString()][string]$Text)
+    [System.IO.File]::WriteAllText($Path, $Text, $script:Utf8NoBom)
+}
+
+<#
   Whether a parsed projects map trusts a directory in BOTH path forms: a key equal to
   each form, case and all, holding an object whose hasTrustDialogAccepted is true. The one
   definition of "trusted" -- the seed and the post-launch check both use it, so they
@@ -158,7 +178,7 @@ function Set-ProjectTrust {
     $backup = Join-Path $BackupDir ('claude.json.backup-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
     Copy-Item $file $backup -Force
 
-    $raw = Get-Content $file -Raw
+    $raw = Read-Utf8File $file
     # WHAT IS TRUSTED IS DECIDED FROM THE PARSED FILE, the way Claude Code reads it: a
     # "projects" key equal to the path form, case and all, with the flag true. Searching
     # the text for the quoted path was not that. It found the path as a value elsewhere
@@ -255,7 +275,7 @@ function Set-ProjectTrust {
         return $false
     }
 
-    Set-Content -Path $file -Value $raw -Encoding UTF8 -NoNewline
+    Write-Utf8File $file $raw
     Write-Verbose "trust seeded (backup at $backup)"
     return $true
 }
@@ -283,7 +303,7 @@ function Test-TrustSurvived {
     # swallowed the way the old blanket catch was) and still reported as not-survived. The
     # 5.1 -AsHashtable bind error that old catch used to hide is gone now that Read-ClaudeProjectMap
     # is edition-aware.
-    $raw = try { Get-Content $file -Raw -ErrorAction Stop } catch { return $false }
+    $raw = try { Read-Utf8File $file } catch { return $false }
     $projects = try { Read-ClaudeProjectMap $raw }
                 catch { Write-Warning "~/.claude.json did not parse while verifying trust for '$Directory': $($_.Exception.Message)"; return $false }
     return (Test-ProjectMapTrusted $projects $Directory)
@@ -309,7 +329,7 @@ function Set-ProjectGrant {
 
     $obj = $null
     if (Test-Path $file) {
-        try { $obj = Get-Content $file -Raw | ConvertFrom-Json }
+        try { $obj = Read-Utf8File $file | ConvertFrom-Json }
         catch { Write-Warning "$file exists but is not valid JSON -- leaving it untouched"; return }
     }
     if (-not $obj) { $obj = [PSCustomObject]@{} }
@@ -324,6 +344,6 @@ function Set-ProjectGrant {
         $obj.permissions | Add-Member -NotePropertyName additionalDirectories -NotePropertyValue @($Grants)
     }
 
-    $obj | ConvertTo-Json -Depth 10 | Set-Content -Path $file -Encoding UTF8
+    Write-Utf8File $file ($obj | ConvertTo-Json -Depth 10)
     Write-Verbose "project settings: $file"
 }

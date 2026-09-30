@@ -209,3 +209,82 @@ Describe 'Test-TrustSurvived' {
         Survived -Existing '{ "projects": { "C:\\probe-wd": "nope", "C:/probe-wd": "nope" } }' | Should -BeFalse
     }
 }
+
+Describe 'Claude Code files keep their encoding' {
+    <#
+      Claude Code writes its JSON as UTF-8 without a BOM. Windows PowerShell 5.1 reads such
+      a file as ANSI and writes UTF-8 WITH a BOM, so on 5.1 any non-ASCII text came back as
+      mojibake, a BOM was put in front of the file, and a trust key under a non-ASCII path
+      never matched. These bite on 5.1 -- CI's test-desktop leg.
+
+      Non-ASCII is built from code points, and fixtures are written as explicit bytes: this
+      file is ASCII, and a 5.1 Set-Content would itself write ANSI.
+    #>
+    BeforeAll {
+        $script:Utf8 = [Text.UTF8Encoding]::new($false)
+        $script:Text = 'caf' + [char]0xE9 + ' ' + [char]0x65E5 + [char]0x672C + ' ' + [char]::ConvertFromUtf32(0x1F680)
+        $script:Dir  = 'C:\Users\Jos' + [char]0xE9 + '\work'
+        function NewHome([string]$Json) {
+            $h = Join-Path $script:Sandbox ([guid]::NewGuid())
+            New-Item -ItemType Directory -Path $h -Force | Out-Null
+            [IO.File]::WriteAllText((Join-Path $h '.claude.json'), $Json, $script:Utf8)
+            $h
+        }
+        function HasBom([string]$Path) {
+            $b = [IO.File]::ReadAllBytes($Path)
+            $b.Length -ge 3 -and $b[0] -eq 0xEF -and $b[1] -eq 0xBB -and $b[2] -eq 0xBF
+        }
+    }
+    BeforeEach { $script:RealProfile = $env:USERPROFILE }
+    AfterEach  { $env:USERPROFILE = $script:RealProfile }
+
+    It 'seeding keeps non-ASCII text exactly, and writes no BOM' {
+        $h = NewHome ('{ "userName": "' + $script:Text + '", "projects": {} }')
+        InModuleScope Greenroom -Parameters @{ h = $h } { param($h); $env:USERPROFILE = $h; Set-ProjectTrust -Directory 'C:\probe-wd' -BackupDir (Join-Path $h 'b') | Out-Null }
+        $file = Join-Path $h '.claude.json'
+        HasBom $file | Should -BeFalse
+        $after = [IO.File]::ReadAllText($file, $script:Utf8)
+        [regex]::Match($after, '"userName": "([^"]*)"').Groups[1].Value | Should -BeExactly $script:Text
+    }
+
+    It 'trusts a working directory with a non-ASCII name under the key Claude Code will read' {
+        # Self-consistency is not enough: a seed and a check that mis-decode the same way agree
+        # with each other. What matters is the key as Claude Code reads the file -- UTF-8.
+        $h = NewHome '{ "projects": {} }'
+        $ok = InModuleScope Greenroom -Parameters @{ h = $h; d = $script:Dir } {
+            param($h, $d); $env:USERPROFILE = $h
+            Set-ProjectTrust -Directory $d -BackupDir (Join-Path $h 'b') | Out-Null
+            Test-TrustSurvived -Directory $d
+        }
+        $ok | Should -BeTrue
+        $asRead = [IO.File]::ReadAllText((Join-Path $h '.claude.json'), $script:Utf8) | ConvertFrom-Json
+        $asRead.projects.($script:Dir).hasTrustDialogAccepted | Should -BeTrue
+    }
+
+    It 'recognises trust under a non-ASCII path in the file as Claude Code writes it, and adds nothing' {
+        # Claude Code rewrites ~/.claude.json constantly, BOM-less. Read as ANSI, the key no
+        # longer matched: the check said "not trusted" forever and the seed added a second,
+        # mojibake entry.
+        $k1 = $script:Dir.Replace('\', '\\'); $k2 = $script:Dir.Replace('\', '/')
+        $json = '{ "projects": { "' + $k1 + '": { "hasTrustDialogAccepted": true }, "' + $k2 + '": { "hasTrustDialogAccepted": true } } }'
+        $h = NewHome $json
+        $r = InModuleScope Greenroom -Parameters @{ h = $h; d = $script:Dir } {
+            param($h, $d); $env:USERPROFILE = $h
+            [PSCustomObject]@{
+                Survived = Test-TrustSurvived -Directory $d
+                Seeded   = Set-ProjectTrust -Directory $d -BackupDir (Join-Path $h 'b')
+            }
+        }
+        $r.Survived | Should -BeTrue
+        [IO.File]::ReadAllText((Join-Path $h '.claude.json'), $script:Utf8) | Should -BeExactly $json
+    }
+
+    It 'writes the project settings without a BOM, keeping a non-ASCII grant' {
+        $wd = Join-Path $script:Sandbox ([guid]::NewGuid())
+        $grant = 'D:\' + $script:Text
+        InModuleScope Greenroom -Parameters @{ w = $wd; g = $grant } { param($w, $g); Set-ProjectGrant -Directory $w -Grants @($g) }
+        $file = Join-Path $wd '.claude\settings.json'
+        HasBom $file | Should -BeFalse
+        ([IO.File]::ReadAllText($file, $script:Utf8) | ConvertFrom-Json).permissions.additionalDirectories | Should -BeExactly $grant
+    }
+}
