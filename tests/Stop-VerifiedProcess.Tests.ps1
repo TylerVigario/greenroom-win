@@ -53,6 +53,59 @@ Describe 'Stop-VerifiedProcess' {
         }
     }
 
+    Context 'an instance''s session' {
+        # Only the session greenroom's launcher started for the instance -- never one started
+        # by hand under the same name. Processes are faked and no kill is real.
+        BeforeAll {
+            $script:Launcher = 'C:\Users\x\Documents\PowerShell\Modules\Greenroom\0.7.0\Assets\greenroom-launch.ps1'
+            function Proc([int]$Id, [int]$Parent, [string]$Name, [string]$Cmd) {
+                [PSCustomObject]@{ ProcessId = $Id; ParentProcessId = $Parent; Name = $Name; CommandLine = $Cmd }
+            }
+        }
+        BeforeEach {
+            $script:Table = @(
+                (Proc 50 1 'pwsh.exe' "pwsh.exe -NoLogo -File $script:Launcher -Instance render-"),
+                (Proc 100 50 'claude.exe' 'claude.exe --remote-control render- --name render-'),
+                (Proc 60 1 'pwsh.exe' 'pwsh.exe'),
+                (Proc 101 60 'claude.exe' 'claude.exe --remote-control render-'),
+                (Proc 70 1 'pwsh.exe' "pwsh.exe -NoLogo -File $script:Launcher -Instance render-two"),
+                (Proc 102 70 'claude.exe' 'claude.exe --remote-control render-two')
+            )
+            Mock -ModuleName Greenroom Get-CimInstance {
+                if ($Filter -eq "Name='claude.exe'") { return @($script:Table | Where-Object Name -eq 'claude.exe') }
+                if ($Filter -match '^ProcessId=(\d+)$') { return @($script:Table | Where-Object ProcessId -eq ([int]$Matches[1])) }
+            }
+            Mock -ModuleName Greenroom Stop-Process { }
+        }
+
+        It 'stops the session greenroom started for it, and nothing else' {
+            $n = InModuleScope Greenroom { Stop-VerifiedProcess -ProcessName 'claude.exe' -SessionOf 'render-' -Label 'session' }
+            $n | Should -Be 1
+            Should -Invoke -ModuleName Greenroom Stop-Process -Times 1 -Exactly
+            Should -Invoke -ModuleName Greenroom Stop-Process -Times 1 -Exactly -ParameterFilter { $Id -eq 100 }
+        }
+
+        It 'stops nothing when the only session under the name was started by hand' {
+            $script:Table = @($script:Table | Where-Object { $_.ProcessId -notin 50, 100 })
+            $n = InModuleScope Greenroom { Stop-VerifiedProcess -ProcessName 'claude.exe' -SessionOf 'render-' -Label 'session' }
+            $n | Should -Be 0
+            Should -Invoke -ModuleName Greenroom Stop-Process -Times 0
+        }
+
+        It 'does not stop a pid that stopped being the session before the kill' {
+            # Enumerated as greenroom's session; by the re-check the pid is a hand-started one.
+            $script:Checks = 0
+            Mock -ModuleName Greenroom Get-CimInstance {
+                $script:Checks++
+                if ($script:Checks -eq 1) { return (Proc 50 1 'pwsh.exe' "pwsh.exe -File $script:Launcher -Instance render-") }
+                return (Proc 100 60 'claude.exe' 'claude.exe --remote-control render-')
+            } -ParameterFilter { $Filter -eq 'ProcessId=100' -or $Filter -eq 'ProcessId=50' }
+            $n = InModuleScope Greenroom { Stop-VerifiedProcess -ProcessName 'claude.exe' -SessionOf 'render-' -Label 'session' }
+            $n | Should -Be 0
+            Should -Invoke -ModuleName Greenroom Stop-Process -Times 0
+        }
+    }
+
     It 'stops and counts a real process' {
         $marker = 'gr-stop-probe-' + [guid]::NewGuid().ToString('N')
         $shell = (Get-Process -Id $PID).Path

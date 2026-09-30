@@ -5,6 +5,11 @@
   Stop processes matching a command-line pattern, re-verifying identity immediately
   before each kill.
 
+  Or, with -SessionOf, stop an instance's session: a claude.exe greenroom's launcher
+  started for that instance -- see Get-GreenroomSessionName. Not by pattern: the session's
+  --remote-control name is on any Remote Control session, greenroom's or not, and a
+  pattern on it stopped a session started by hand under the same name.
+
   A pid recorded moments ago can already belong to something else. On 2026-07-29 a
   launcher exited between enumeration and termination and only this re-check prevented
   killing whatever had inherited its pid.
@@ -16,27 +21,28 @@ function Stop-VerifiedProcess {
     # Restart-GreenroomSession gates the whole restart with one ShouldProcess call, so
     # gating each of the three kills separately would ask three times for one decision.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName = 'Pattern')]
     [OutputType([int])]
     param(
         [Parameter(Mandatory)][string[]]$ProcessName,
-        [Parameter(Mandatory)][string]$Pattern,
+        [Parameter(Mandatory, ParameterSetName = 'Pattern')][string]$Pattern,
+        [Parameter(Mandatory, ParameterSetName = 'Session')][string]$SessionOf,
         [Parameter(Mandatory)][string]$Label
     )
 
     $stopped = 0
     # ProcessName may name more than one binary. An instance's watchdog and launcher run
     # under whatever shell was resolved -- pwsh.exe where pwsh 7 is present, powershell.exe
-    # on stock Windows -- so both have to be matched. The command-line Pattern is the real
+    # on stock Windows -- so both have to be matched. The identity test is the real
     # discriminator; the name is only a cheap pre-filter.
     $filter = ($ProcessName | ForEach-Object { "Name='$_'" }) -join ' OR '
     $candidates = @(Get-CimInstance Win32_Process -Filter $filter -ErrorAction SilentlyContinue -Verbose:$false |
-                    Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match $Pattern })
+                    Where-Object { $_.ProcessId -ne $PID -and (Test-StopTarget -Proc $_ -Pattern $Pattern -SessionOf $SessionOf) })
 
     foreach ($p in $candidates) {
         $live = Get-CimInstance Win32_Process -Filter "ProcessId=$($p.ProcessId)" -ErrorAction SilentlyContinue -Verbose:$false
         if (-not $live) { continue }
-        if ($live.CommandLine -notmatch $Pattern) {
+        if (-not (Test-StopTarget -Proc $live -Pattern $Pattern -SessionOf $SessionOf)) {
             Write-Verbose "skipped pid $($p.ProcessId) -- no longer matches $Label"
             continue
         }
@@ -49,7 +55,7 @@ function Stop-VerifiedProcess {
         Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue -ErrorVariable failed
         if ($failed) {
             $still = Get-CimInstance Win32_Process -Filter "ProcessId=$($p.ProcessId)" -ErrorAction SilentlyContinue -Verbose:$false
-            if ($still -and $still.CommandLine -match $Pattern) {
+            if ($still -and (Test-StopTarget -Proc $still -Pattern $Pattern -SessionOf $SessionOf)) {
                 Write-Warning "could not stop $Label (pid $($p.ProcessId)): $($failed[0])"
                 continue
             }
@@ -59,6 +65,17 @@ function Stop-VerifiedProcess {
     }
 
     return $stopped
+}
+
+# Whether a process record is the one Stop-VerifiedProcess was asked to stop. Asked of the
+# enumerated record and again of the live one right before the kill.
+function Test-StopTarget {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param($Proc, [string]$Pattern, [string]$SessionOf)
+
+    if ($SessionOf) { return (Get-GreenroomSessionName -ClaudeProc $Proc) -eq $SessionOf }
+    [string]$Proc.CommandLine -match $Pattern
 }
 
 <#

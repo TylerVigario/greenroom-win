@@ -376,7 +376,8 @@ Describe 'Instance names ending in a dot or dash' {
     #
     # These assert the pattern the code actually passes matches a real command line,
     # rather than asserting the pattern's text, so a future rewrite that is still correct
-    # keeps passing.
+    # keeps passing. A session is not stopped by pattern but by ownership, for the instance
+    # named: that such names are matched is tested with Stop-VerifiedProcess.
 
     BeforeEach {
         Mock -ModuleName Greenroom Get-ScheduledTask { [PSCustomObject]@{ TaskName = 'greenroom-x' } }
@@ -390,11 +391,10 @@ Describe 'Instance names ending in a dot or dash' {
         }
     }
 
-    It 'Restart matches a session whose name ends in a dash' {
+    It 'Restart stops the session of an instance whose name ends in a dash' {
         Restart-GreenroomSession -Name 'render-' | Out-Null
         Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 1 -Exactly -ParameterFilter {
-            $Label -eq 'session' -and
-            ('claude.exe --remote-control render- --add-dir C:\x' -match $Pattern)
+            $Label -eq 'session' -and $SessionOf -eq 'render-'
         }
     }
 
@@ -406,14 +406,13 @@ Describe 'Instance names ending in a dot or dash' {
         }
     }
 
-    It 'Uninstall matches a session whose name ends in a dash' {
+    It 'Uninstall stops the session of an instance whose name ends in a dash' {
         Mock -ModuleName Greenroom Get-GreenroomStateRoot { [IO.Path]::GetTempPath() }
         Mock -ModuleName Greenroom Unregister-ScheduledTask { }
         Mock -ModuleName Greenroom Stop-ScheduledTask { }
         Uninstall-GreenroomInstance -Name 'render-' | Out-Null
         Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 1 -Exactly -ParameterFilter {
-            $Label -eq 'session' -and
-            ('claude.exe --remote-control render-' -match $Pattern)
+            $Label -eq 'session' -and $SessionOf -eq 'render-'
         }
     }
 
@@ -580,7 +579,7 @@ Describe 'Stop-GreenroomSession' {
         Should -Invoke -ModuleName Greenroom Stop-ScheduledTask -Times 0
     }
 
-    It 'matches a session whose name ends in a dash' {
+    It 'stops the session of an instance whose name ends in a dash' {
         # ValidatePattern allows 'render-', and a \b word boundary does not match after a
         # non-word character -- the bug that made the kill patterns match nothing.
         Mock -ModuleName Greenroom Get-ScheduledTask {
@@ -588,8 +587,7 @@ Describe 'Stop-GreenroomSession' {
         }
         Stop-GreenroomSession -Name 'render-' | Out-Null
         Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 1 -Exactly -ParameterFilter {
-            $Label -eq 'session' -and
-            ('claude.exe --remote-control render- --add-dir C:\x' -match $Pattern)
+            $Label -eq 'session' -and $SessionOf -eq 'render-'
         }
     }
 
