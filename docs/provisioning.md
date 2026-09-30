@@ -369,7 +369,10 @@ Claude Desktop there are always other `claude.exe` processes, and any of them ca
 rewrite that file in between. If the seed is gone it re-seeds and restarts once, and
 says so plainly if that fails.
 
-It refuses to write `~/.claude.json` at all if the result would not parse as JSON.
+It refuses to write `~/.claude.json` at all if the result would not parse as JSON. Before
+it does write, it copies the file as it was into `~\.claude\greenroom\<instance>\` as
+`claude.json.backup-<timestamp>`, keeping that instance's five most recent copies. A run
+that finds trust already in place writes nothing and copies nothing.
 
 **This is the only file outside greenroom's own directories that installing writes.**
 `-NoTrustSeed` declines it entirely — run `claude` once in the working directory and
