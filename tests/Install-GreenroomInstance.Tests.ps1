@@ -25,6 +25,23 @@ BeforeAll {
         $Config | ConvertTo-Json | Set-Content (Join-Path $script:StateRoot 'probe\config.json')
     }
 
+    # EVERYTHING INSTALL ACTS WITH, as a tripwire. These tests call the real
+    # Install-GreenroomInstance and expect it to stop early -- at parameter validation, at
+    # a refusal. If it ever does not, it must fail here, not go on to act on the machine
+    # running the tests. MEASURED: with the name validation weakened, one of these tests
+    # once ran a real install -- a scheduled task, a crash-looping watchdog and trust
+    # entries in the real ~/.claude.json -- because nothing in it was mocked. A test that
+    # needs a step to succeed mocks that step itself, which overrides the tripwire.
+    function InstallTripwires {
+        Mock -ModuleName Greenroom Get-GreenroomStateRoot { $script:StateRoot }
+        Mock -ModuleName Greenroom Get-ScheduledTask { $null }
+        foreach ($c in 'Resolve-GreenroomPrerequisite', 'Assert-ClaudeModel', 'Set-ProjectTrust', 'Set-ProjectGrant',
+                       'Test-TrustSurvived', 'Register-GreenroomTask', 'Start-ScheduledTask', 'Stop-ScheduledTask',
+                       'Restart-GreenroomSession', 'Wait-GreenroomSession') {
+            Mock -ModuleName Greenroom $c ([scriptblock]::Create("throw 'tripwire: $c must not be reached'"))
+        }
+    }
+
     # Resolve-InstallParameter is private; -Bound is what a caller's $PSBoundParameters
     # would hold, which is how "was it passed or omitted" is decided.
     function Resolve {
@@ -211,14 +228,19 @@ Describe 'Resolve-InstallParameter' {
 
 Describe 'Install-GreenroomInstance' {
 
-    It 'rejects an invalid instance name before doing anything' {
+    BeforeEach { InstallTripwires }
+
+    It 'rejects an invalid instance name before doing anything: <Name>' -ForEach @(
         # The name goes on a command line, is matched back out of one, and becomes part
-        # of a task name, so spaces and oddities are refused at the parameter.
-        { Install-GreenroomInstance -Name 'has space' -ErrorAction Stop } | Should -Throw
-        { Install-GreenroomInstance -Name '-startsdash' -ErrorAction Stop } | Should -Throw
-        # Windows drops a trailing dot from a path, so 'probe.' would read and write
-        # probe's state directory.
-        { Install-GreenroomInstance -Name 'probe.' -ErrorAction Stop } | Should -Throw -ErrorId 'ParameterArgumentValidationError*'
+        # of a task name, so spaces and oddities are refused at the parameter. Windows
+        # drops a trailing dot from a path, so 'probe.' would read and write probe's state.
+        @{ Name = 'has space' }, @{ Name = '-startsdash' }, @{ Name = 'probe.' }
+    ) {
+        # The parameter's own error, specifically: a tripwire's throw would satisfy a bare
+        # Should -Throw, and hide exactly the regression this is for.
+        { Install-GreenroomInstance -Name $Name -ErrorAction Stop } | Should -Throw -ErrorId 'ParameterArgumentValidationError*'
+        Should -Invoke -ModuleName Greenroom Resolve-GreenroomPrerequisite -Times 0
+        Should -Invoke -ModuleName Greenroom Register-GreenroomTask -Times 0
     }
 
     It 'names instances by the same rule Uninstall- enforces' {
@@ -268,6 +290,7 @@ Describe 'Install-GreenroomInstance' {
 Describe 'Model' {
 
     BeforeEach {
+        InstallTripwires
         Mock -ModuleName Greenroom Get-GreenroomStateRoot { $script:StateRoot }
         # Get-ScheduledTask too: a previous config without triggerDelay makes
         # Resolve-InstallParameter fall back to reading the registered task, so without
