@@ -61,6 +61,22 @@ function Resolve-GreenroomPrerequisite {
         '*\AppData\Roaming\Claude\claude-code\*'
     )
 
+    # AN EXPLICIT -ClaudeExe IS THAT PATH OR NOTHING. As one candidate among the others, a
+    # choice the filters below reject -- Claude Desktop's bundled claude.exe -- simply
+    # dropped out, auto-detection supplied another, and install then recorded THAT path as
+    # the explicit choice, pinning it on every later re-run. So it is checked alone, and
+    # refused with the reason.
+    if ($ClaudeExe) {
+        foreach ($pat in $desktopPatterns) {
+            if ($ClaudeExe -like $pat) {
+                throw ("-ClaudeExe '$ClaudeExe' is Claude Desktop's bundled claude.exe, not a Claude Code CLI " +
+                       'greenroom can run. Pass the CLI''s path, or omit -ClaudeExe to find it automatically.')
+            }
+        }
+        if (-not (Test-Path -LiteralPath $ClaudeExe)) { throw "-ClaudeExe '$ClaudeExe' does not exist." }
+        $candidates = @($ClaudeExe)
+    }
+
     $seen = @{}
     $claude = $candidates | Where-Object {
         if (-not $_) { return $false }

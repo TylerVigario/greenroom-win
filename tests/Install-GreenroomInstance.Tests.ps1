@@ -375,3 +375,33 @@ Describe 'Resolve-GreenroomShell' {
         InModuleScope Greenroom { Resolve-GreenroomShell } | Should -Be (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe')
     }
 }
+
+Describe 'Resolve-GreenroomPrerequisite with an explicit -ClaudeExe' {
+    <#
+      An explicit -ClaudeExe is that path or nothing. As one candidate among the others, a
+      path the filters reject -- Claude Desktop's bundled claude.exe -- dropped out, the CLI
+      on PATH was used instead, and install recorded THAT as the explicit choice.
+
+      Hermetic: Test-Path and Get-Command are mocked, and every case must stop before any
+      claude.exe is run.
+    #>
+    BeforeEach {
+        Mock -ModuleName Greenroom Test-Path { $true }
+        Mock -ModuleName Greenroom Get-Command { [PSCustomObject]@{ Source = "C:\Users\x\.local\bin\$Name" } }
+    }
+
+    It 'refuses Claude Desktop''s claude.exe rather than quietly using another: <Exe>' -ForEach @(
+        @{ Exe = 'C:\Program Files\WindowsApps\Claude_1.0.0.0_x64__abc\app\claude.exe' }
+        @{ Exe = 'C:\Users\x\AppData\Local\AnthropicClaude\app-1.0.0\claude.exe' }
+        @{ Exe = 'C:\Users\x\AppData\Roaming\Claude\claude-code\2.1.0\claude.exe' }
+    ) {
+        { InModuleScope Greenroom -Parameters @{ e = $Exe } { param($e) Resolve-GreenroomPrerequisite -ClaudeExe $e } } |
+            Should -Throw "*is Claude Desktop's bundled claude.exe*"
+    }
+
+    It 'refuses a missing explicit path rather than falling back' {
+        Mock -ModuleName Greenroom Test-Path { $false } -ParameterFilter { $LiteralPath -eq 'C:\nope\claude.exe' }
+        { InModuleScope Greenroom { Resolve-GreenroomPrerequisite -ClaudeExe 'C:\nope\claude.exe' } } |
+            Should -Throw "*-ClaudeExe 'C:\nope\claude.exe' does not exist*"
+    }
+}
