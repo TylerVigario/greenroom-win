@@ -2,7 +2,12 @@
 # Copyright (C) 2026 Tyler Vigario
 
 <#
-  Every running greenroom session on this host, as process records.
+  Every running greenroom session on this host, as process records -- greenroom's OWN.
+
+  A claude.exe is one only if greenroom started it: see Get-GreenroomSessionName. Any
+  claude.exe can carry "--remote-control <name>", so the name alone listed sessions greenroom
+  never started -- a Remote Control session run by hand, as though it were an instance, and
+  one run with the unrelated --remote-control-session-name-prefix flag as "(unnamed)".
 
   Anchors on claude.exe itself rather than on a launcher. Two earlier approaches
   failed: matching pwsh by command line also matched shells that merely MENTIONED
@@ -22,10 +27,14 @@ function Get-SessionProcess {
     $all = @(Get-CimInstance Win32_Process -Filter "Name='claude.exe'" -ErrorAction SilentlyContinue -Verbose:$false |
              Where-Object { $_.ProcessId -ne $PID })
 
-    foreach ($p in ($all | Where-Object { $_.CommandLine -match '--remote-control' })) {
-        $name = '(unnamed)'
-        if ($p.CommandLine -match '--remote-control\s+"?([^"\s-][^"\s]*)') { $name = $Matches[1] }
-        [PSCustomObject]@{ Instance = $name; Claude = $p; Pid = $p.ProcessId; Opaque = $false }
+    foreach ($p in ($all | Where-Object { $_.CommandLine })) {
+        $name = Get-GreenroomSessionName -ClaudeProc $p
+        if ($name) {
+            [PSCustomObject]@{ Instance = $name; Claude = $p; Pid = $p.ProcessId; Opaque = $false }
+        }
+        elseif ($p.CommandLine -match '--remote-control') {
+            Write-Verbose "claude.exe pid $($p.ProcessId) uses Remote Control but greenroom did not start it -- not listed"
+        }
     }
 
     # MEASURED on the reference host: Win32_Process.CommandLine comes back NULL for any
@@ -47,6 +56,38 @@ function Get-SessionProcess {
             [PSCustomObject]@{ Instance = '(unreadable)'; Claude = $p; Pid = $p.ProcessId; Opaque = $true }
         }
     }
+}
+
+<#
+  The greenroom instance a claude.exe is the session of, or $null if greenroom did not start it.
+
+  Greenroom starts every session the same way: its launcher, greenroom-launch.ps1, runs
+  `claude --remote-control <instance> ...` and waits on it, so the launcher is the session's
+  PARENT for as long as the session runs. MEASURED on the reference host: the live session's
+  claude.exe is a direct child of the pwsh running greenroom-launch.ps1 -Instance <instance>.
+  So a session is greenroom's only when:
+
+    - its own command line carries --remote-control <name> -- the flag exactly, not the
+      unrelated --remote-control-session-name-prefix;
+    - its parent's command line runs greenroom-launch.ps1 with -Instance <name>;
+    - and the two names are the same.
+
+  A claude.exe started any other way -- a Remote Control session run by hand under the same
+  name included -- is not greenroom's, and nothing in greenroom acts on it.
+#>
+function Get-GreenroomSessionName {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)]$ClaudeProc)
+
+    if ([string]$ClaudeProc.CommandLine -notmatch '--remote-control\s+"?([^"\s-][^"\s]*)') { return $null }
+    $name = $Matches[1]
+    if (-not $ClaudeProc.ParentProcessId) { return $null }
+    $parent = Get-CimInstance Win32_Process -Filter "ProcessId=$($ClaudeProc.ParentProcessId)" -ErrorAction SilentlyContinue -Verbose:$false
+    $cmd = [string]$parent.CommandLine
+    if ($cmd -notmatch 'greenroom-launch\.ps1"?(\s|$)') { return $null }
+    if ($cmd -notmatch ('-Instance\s+"?' + [regex]::Escape($name) + '("|\s|$)')) { return $null }
+    $name
 }
 
 # The WindowsTerminal.exe hosting a session, by walking up from claude.exe.
