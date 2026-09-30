@@ -330,39 +330,45 @@ Describe 'The self-restart guard' {
     # Also its own Describe: the suite elsewhere mocks Test-SelfIsInstance to $false so
     # the destructive path can be exercised, and that mock would shadow the thing being
     # tested here.
+    #
+    # The ancestry is faked: this process is a shell inside claude.exe 4242, whose parent is
+    # 4241 -- greenroom's launcher, or an ordinary shell.
+
+    BeforeAll {
+        function UseAncestry([string]$Session, [string]$Parent) {
+            $script:Ancestry = @(
+                [PSCustomObject]@{ ProcessId = 4242; ParentProcessId = 4241; Name = 'claude.exe'; CommandLine = $Session },
+                [PSCustomObject]@{ ProcessId = 4241; ParentProcessId = 1; Name = 'pwsh.exe'; CommandLine = $Parent }
+            )
+            Mock -ModuleName Greenroom Get-CimInstance {
+                $id = if ($Filter -match '^ProcessId=(\d+)$') { [int]$Matches[1] }
+                if ($id -eq $PID) { return [PSCustomObject]@{ ProcessId = $PID; ParentProcessId = 4242; Name = 'pwsh.exe'; CommandLine = 'pwsh.exe' } }
+                $script:Ancestry | Where-Object ProcessId -eq $id
+            }
+        }
+        $script:Launch = 'pwsh.exe -NoLogo -File C:\m\Greenroom\0.7.0\Assets\greenroom-launch.ps1 -Instance '
+    }
 
     It 'fires for an instance name ending in a dash' {
         # The dangerous case. A guard that misses lets you restart the instance your own
         # shell runs inside, which leaves it DOWN rather than restarted.
-        Mock -ModuleName Greenroom Get-CimInstance {
-            [PSCustomObject]@{
-                ProcessId = 4242; Name = 'claude.exe'
-                CommandLine = 'claude.exe --remote-control render-'
-                ParentProcessId = 0
-            }
-        }
+        UseAncestry 'claude.exe --remote-control render-' ($script:Launch + 'render-')
         InModuleScope Greenroom { Test-SelfIsInstance -Name 'render-' } | Should -BeTrue
     }
 
     It 'fires for an instance name ending in a dot' {
-        Mock -ModuleName Greenroom Get-CimInstance {
-            [PSCustomObject]@{
-                ProcessId = 4242; Name = 'claude.exe'
-                CommandLine = 'claude.exe --remote-control v1.'
-                ParentProcessId = 0
-            }
-        }
+        UseAncestry 'claude.exe --remote-control v1.' ($script:Launch + 'v1.')
         InModuleScope Greenroom { Test-SelfIsInstance -Name 'v1.' } | Should -BeTrue
     }
 
     It 'does not fire for a different instance sharing a prefix' {
-        Mock -ModuleName Greenroom Get-CimInstance {
-            [PSCustomObject]@{
-                ProcessId = 4242; Name = 'claude.exe'
-                CommandLine = 'claude.exe --remote-control render-two'
-                ParentProcessId = 0
-            }
-        }
+        UseAncestry 'claude.exe --remote-control render-two' ($script:Launch + 'render-two')
+        InModuleScope Greenroom { Test-SelfIsInstance -Name 'render-' } | Should -BeFalse
+    }
+
+    It 'does not fire inside a session started by hand under the instance''s name' {
+        # Not greenroom's, so Stop, Restart and Uninstall do not kill it: nothing to guard.
+        UseAncestry 'claude.exe --remote-control render-' 'pwsh.exe'
         InModuleScope Greenroom { Test-SelfIsInstance -Name 'render-' } | Should -BeFalse
     }
 }
