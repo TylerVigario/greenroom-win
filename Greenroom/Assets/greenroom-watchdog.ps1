@@ -110,19 +110,21 @@ function Get-RcClaudePid {
 # exits normally and the window closes with it -- but killing the launcher shell
 # does, and so does any abnormal termination of it.
 #
-# For greenroom that corpse is not cosmetic. It holds "<glyph> <instance>", which
-# is exactly the title the replacement session will have, so greenroom.ps1 finds
-# two windows matching one name, refuses to choose, and attach breaks permanently
-# with nothing on screen to explain it.
+# Left alone, every abnormal death leaks one such window -- hidden, unless it had
+# been shown -- so the watchdog closes it before starting the replacement.
 #
-# This runs only from Start-RcSession, which is reached only after Get-RcClaudePid
-# has confirmed no live session for this instance. Any window still bearing the
-# instance name at that moment is therefore stale by definition. Combined with the
-# single-instance mutex, no other watchdog can be launching a replacement
-# concurrently, so there is nothing live to mistake for a corpse.
+# Only the window greenroom created for this instance is ever closed: the handle
+# Save-SessionWindow recorded in session.json. Closing by title closed any window
+# carrying "<glyph> <instance>", and that is not only greenroom's. A Remote Control
+# session started by hand under the instance's name is not the watchdog's own, so it
+# does not count as a live session here -- and its window, if titled the same, was
+# closed as a corpse, taking a session greenroom never started with it.
 #
-# PostMessage, not SendMessage: PostMessage returns immediately, so an unresponsive
-# window cannot block the supervisor. Closing is best-effort by design.
+# The record is validated, never trusted, because Windows reuses handles: the handle
+# must still be a CASCADIA_HOSTING window of the recorded WindowsTerminal process, and
+# still carry exactly this instance's session title. With no usable record nothing is
+# known to be greenroom's, and nothing is closed. Attach resolves only from the record
+# too (Resolve-SessionWindow), so a corpse left behind costs a window, not attach.
 if (-not ('GreenroomWd.Win1' -as [type])) {
     Add-Type -Namespace GreenroomWd -Name Win1 -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr p);
@@ -215,34 +217,48 @@ function Save-SessionWindow {
 # closes windows that are not this instance's: "admin" once matched "<glyph> laptop-admin".
 . (Join-Path $PSScriptRoot 'Test-SessionTitle.ps1')
 
+# Owner pid, class and title of one window. OwnerPid is 0 when the handle names no window.
+function Get-WindowInfo {
+    param([IntPtr]$Handle)
+    $wp = 0
+    [GreenroomWd.Win1]::GetWindowThreadProcessId($Handle, [ref]$wp) | Out-Null
+    $cls = New-Object System.Text.StringBuilder 256
+    [GreenroomWd.Win1]::GetClassName($Handle, $cls, 256) | Out-Null
+    $tb = New-Object System.Text.StringBuilder 512
+    [GreenroomWd.Win1]::GetWindowText($Handle, $tb, 512) | Out-Null
+    [PSCustomObject]@{ OwnerPid = [int]$wp; Class = $cls.ToString(); Title = $tb.ToString() }
+}
+
+# WM_CLOSE. PostMessage, not SendMessage: PostMessage returns immediately, so an
+# unresponsive window cannot block the supervisor. Closing is best-effort by design.
+function Send-WindowClose {
+    param([IntPtr]$Handle)
+    [GreenroomWd.Win1]::PostMessage($Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+}
+
 function Close-StaleWindows {
-    # Same EnumWindowsProc lParam as above.
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '')]
     [CmdletBinding()]
     param()
 
-    $script:staleHits = @()
-    $script:staleInstance = $Instance
-    $cb = [GreenroomWd.Win1+EnumWindowsProc] {
-        param($h, $l)
-        $sb = New-Object System.Text.StringBuilder 256
-        [GreenroomWd.Win1]::GetClassName($h, $sb, 256) | Out-Null
-        if ($sb.ToString() -match 'CASCADIA_HOSTING') {
-            $tb = New-Object System.Text.StringBuilder 512
-            [GreenroomWd.Win1]::GetWindowText($h, $tb, 512) | Out-Null
-            if (Test-SessionTitle -Title $tb.ToString() -Instance $script:staleInstance) {
-                $script:staleHits += [PSCustomObject]@{ Handle = $h; Title = $tb.ToString() }
-            }
-        }
-        return $true
+    $sf = Join-Path $stateDir 'session.json'
+    if (-not (Test-Path $sf)) { return }
+    try {
+        $rec = Get-Content $sf -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
     }
-    [GreenroomWd.Win1]::EnumWindows($cb, [IntPtr]::Zero) | Out-Null
+    catch { Log "window record unreadable, no stale window closed: $($_.Exception.Message)"; return }
+    if ($null -eq $rec -or -not $rec.handle) { return }
 
-    foreach ($w in $script:staleHits) {
-        [GreenroomWd.Win1]::PostMessage($w.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
-        Log "closed stale window $($w.Handle) '$($w.Title)' -- its host died without releasing it"
+    $w = Get-WindowInfo -Handle ([IntPtr][int64]$rec.handle)
+    # Gone: the usual case. A session that exits normally takes its window with it.
+    if ($w.OwnerPid -eq 0) { return }
+    if ($w.OwnerPid -ne [int]$rec.terminalPid -or $w.Class -notmatch 'CASCADIA_HOSTING' -or
+        -not (Test-SessionTitle -Title $w.Title -Instance $Instance)) {
+        Log "recorded window $($rec.handle) is no longer this instance's session window -- left open"
+        return
     }
-    if ($script:staleHits.Count -gt 0) { Start-Sleep -Milliseconds 500 }
+    Send-WindowClose -Handle ([IntPtr][int64]$rec.handle)
+    Log "closed stale window $($rec.handle) '$($w.Title)' -- its host died without releasing it"
+    Start-Sleep -Milliseconds 500
 }
 
 function Start-RcSession {
