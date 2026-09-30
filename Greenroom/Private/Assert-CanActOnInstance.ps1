@@ -120,7 +120,10 @@ function Invoke-ElevatedSelf {
 
     try {
         try {
-            $p = Start-Process pwsh -Verb RunAs -PassThru -Wait -ErrorAction Stop `
+            # The same shell ladder as everything else greenroom starts: pwsh 7 where there is
+            # one, Windows PowerShell 5.1 where there is not. Naming `pwsh` outright made every
+            # escalation fail on a host without it -- reported as "elevation declined".
+            $p = Start-Process (Resolve-GreenroomShell) -Verb RunAs -PassThru -Wait -ErrorAction Stop `
                      -ArgumentList '-NoLogo', '-NoProfile', '-Command', $inner
         }
         catch {

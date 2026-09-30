@@ -22,18 +22,7 @@ function Resolve-GreenroomPrerequisite {
     ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
     if (-not $wt) { throw 'Windows Terminal (wt.exe) not found and is required. winget install Microsoft.WindowsTerminal' }
 
-    # The shell that runs the watchdog and the session. pwsh 7 is PREFERRED -- WinGet's
-    # version-independent alias first, then the real install path, then anything on PATH.
-    # Windows PowerShell 5.1 ships in-box on every Windows host and is the last resort, so a
-    # machine with no pwsh 7 still installs. greenroom's code runs on both editions, and this
-    # is the same ladder the watchdog .vbs walks at logon.
-    $shell = @(
-        (Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\pwsh.exe'),
-        (Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'),
-        (Get-Command pwsh.exe -ErrorAction SilentlyContinue | ForEach-Object Source),
-        (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe')
-    ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-    if (-not $shell) { throw 'no PowerShell found: neither pwsh.exe nor Windows PowerShell 5.1 (powershell.exe).' }
+    $shell = Resolve-GreenroomShell
 
     $wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
     if (-not (Test-Path $wscript)) { throw "wscript.exe not found at $wscript" }
@@ -255,4 +244,25 @@ function Test-GreenroomHostSetting {
         Write-Warning ("$settings grants these to EVERY instance on this host: $($hostWide -join ', '). " +
                        'Move them into a per-instance -AdditionalDirectories grant instead.')
     }
+}
+
+<#
+  The shell greenroom runs in: the watchdog, the session, and the elevated relaunch.
+  pwsh 7 is PREFERRED -- WinGet's version-independent alias first, then the real install
+  path, then anything on PATH. Windows PowerShell 5.1 ships in-box on every Windows host
+  and is the last resort, so a machine with no pwsh 7 still works. greenroom's code runs
+  on both editions, and this is the same ladder the watchdog .vbs walks at logon.
+#>
+function Resolve-GreenroomShell {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+    $shell = @(
+        (Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\pwsh.exe'),
+        (Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'),
+        (Get-Command pwsh.exe -ErrorAction SilentlyContinue | ForEach-Object Source),
+        (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe')
+    ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+    if (-not $shell) { throw 'no PowerShell found: neither pwsh.exe nor Windows PowerShell 5.1 (powershell.exe).' }
+    $shell
 }

@@ -273,6 +273,16 @@ Describe 'Invoke-ElevatedSelf' {
     # Deliberately its OWN Describe with no Invoke-ElevatedSelf mock -- mocking the
     # function under test is how the first version of this passed while proving nothing.
 
+    It 'starts the shell greenroom resolves, not pwsh by name' {
+        # On a host with only Windows PowerShell 5.1, `pwsh` does not exist and every
+        # escalation failed -- reported as "elevation declined".
+        Mock -ModuleName Greenroom Resolve-GreenroomShell { 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' }
+        Mock -ModuleName Greenroom Start-Process { [PSCustomObject]@{ ExitCode = 0 } }
+        InModuleScope Greenroom { Invoke-ElevatedSelf -Command 'Show-GreenroomSession' -Name 'probe' -WarningAction SilentlyContinue } | Out-Null
+        Should -Invoke -ModuleName Greenroom Start-Process -Times 1 -Exactly -ParameterFilter {
+            $FilePath -eq 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -and $Verb -eq 'RunAs' }
+    }
+
     It 'escalates with -Confirm:$false so the decision is not retaken on defaults' {
         # The caller has already passed its own ShouldProcess gate by the time this runs.
         # A fresh elevated process starts with default preferences, so without this it
@@ -1083,6 +1093,22 @@ function Stop-GreenroomSession {
     It 'exits 0 when every name succeeds' {
         pwsh -NoLogo -NoProfile -Command $script:Inner.Replace("'bad',", '') | Out-Null
         $LASTEXITCODE | Should -Be 0
+        @(Get-Content (Join-Path $script:Stub 'acted.txt')) | Should -Be @('one', 'two')
+    }
+
+    It 'runs the same under Windows PowerShell 5.1, the shell used where there is no pwsh' {
+        # PSModulePath is cleared for the child: inherited from a pwsh 7 test runner it
+        # would load pwsh 7's core modules into 5.1. A real escalation never has that --
+        # 5.1 is chosen only on a host with no pwsh 7 -- so it is a test artefact only.
+        $ErrorActionPreference = 'Continue'
+        $saved = $env:PSModulePath
+        try {
+            Remove-Item Env:PSModulePath -ErrorAction SilentlyContinue
+            & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoLogo -NoProfile -Command $script:Inner 2>$null | Out-Null
+            $code = $LASTEXITCODE
+        }
+        finally { $env:PSModulePath = $saved }
+        $code | Should -Be 1
         @(Get-Content (Join-Path $script:Stub 'acted.txt')) | Should -Be @('one', 'two')
     }
 }
