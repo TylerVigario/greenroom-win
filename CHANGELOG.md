@@ -9,6 +9,48 @@ it. 0.1.0 at the bottom is hand-written and reads "Initial release." because a f
 release has no changes to list — there is nothing it changed from.
 
 - - -
+## [v0.7.0](https://github.com/TylerVigario/greenroom-win/compare/70a7f3c2ccc0e7c620eb6c1f9ed0317ba31a2055..v0.7.0) - 2026-09-30
+#### Features
+- (**release**) publish the package with provenance (#67) - ([1f35b90](https://github.com/TylerVigario/greenroom-win/commit/1f35b901a07a72b8a6718239992557a69240d8d6)) - Tyler Vigario, Claude Opus 5.5
+#### Bug Fixes
+- (**ci**) forbid moving a published tag (#58) - ([70a7f3c](https://github.com/TylerVigario/greenroom-win/commit/70a7f3c2ccc0e7c620eb6c1f9ed0317ba31a2055)) - Tyler Vigario, Claude Opus 5.5
+- (**install**) an explicit -ClaudeExe is that path or nothing (#84) - ([452b2a6](https://github.com/TylerVigario/greenroom-win/commit/452b2a66fdb2b1d1fe25b42fedad95c6b45ddd41)) - Tyler Vigario, Claude Opus 5.5
+- (**install**) store the working directory as the launcher will land (#76) - ([922bc70](https://github.com/TylerVigario/greenroom-win/commit/922bc70a6bbc653951cb4dcfa6e3cc686cfd2d3b)) - Tyler Vigario, Claude Opus 5.5
+- (**install**) refuse an instance name ending in a dot (#72) - ([b751ee2](https://github.com/TylerVigario/greenroom-win/commit/b751ee24807d314d12d3eebe569680acdc432637)) - Tyler Vigario, Claude Opus 5.5
+- (**launcher**) bound launch.log the way watchdog.log is bounded (#85) - ([8e5a9ed](https://github.com/TylerVigario/greenroom-win/commit/8e5a9ed08f96764a79b701999fcd80c81e4a4e62)) - Tyler Vigario, Claude Opus 5.5
+- (**release**) drop the pre-flight gallery key check (#68) - ([070d7bf](https://github.com/TylerVigario/greenroom-win/commit/070d7bff6a1c86bfe754ed6b0488c54047d485c0)) - Tyler Vigario, Claude Opus 5.5
+- (**release**) have GitHub construct the version commit (#66) - ([0e4ce11](https://github.com/TylerVigario/greenroom-win/commit/0e4ce1181467aedf171448ac77c0510d005407d7)) - Tyler Vigario, Claude Opus 5.5
+- (**release**) publish before the version is recorded (#65) - ([54290d1](https://github.com/TylerVigario/greenroom-win/commit/54290d1bca490e1013c3f867853014342b67a15e)) - Tyler Vigario, Claude Opus 5.5
+- (**session**) stop only shells running greenroom's scripts (#91) - ([8e89705](https://github.com/TylerVigario/greenroom-win/commit/8e89705f82213a08193d4af4c85c372ccb48721b)) - Tyler Vigario, Claude Opus 5.5
+- (**session**) guard only against stopping greenroom's own session (#89) - ([f33f229](https://github.com/TylerVigario/greenroom-win/commit/f33f22943372386f2e425f097e512703db45c75a)) - Tyler Vigario, Claude Opus 5.5
+- (**session**) stop only the session greenroom started (#88) - ([a109190](https://github.com/TylerVigario/greenroom-win/commit/a109190b6a7daf160a10f1bec9750d5c0a8600c1)) - Tyler Vigario, Claude Opus 5.5
+- (**session**) list only the sessions greenroom started (#86) - ([73d447f](https://github.com/TylerVigario/greenroom-win/commit/73d447f117b35150f8b115055d8bd17a3d79df8a)) - Tyler Vigario, Claude Opus 5.5
+- (**session**) count a process as stopped only when it is gone (#81) - ([34288d1](https://github.com/TylerVigario/greenroom-win/commit/34288d1f2dfe492c2f5e451df9ba66aec5fdc279)) - Tyler Vigario, Claude Opus 5.5
+- (**session**) escalate in the shell greenroom resolves, not pwsh by name (#79) - ([08d282e](https://github.com/TylerVigario/greenroom-win/commit/08d282eecfe33069de4fd5bc7eb22344644af19b)) - Tyler Vigario, Claude Opus 5.5
+- (**session**) elevate before looking for an elevated session (#75) - ([37a3e00](https://github.com/TylerVigario/greenroom-win/commit/37a3e0053cca1e9706e2166f5bfbc4a84c0b35f7)) - Tyler Vigario, Claude Opus 5.5
+- (**trust**) back up ~/.claude.json only when writing it, and keep five (#83) - ([4447dc9](https://github.com/TylerVigario/greenroom-win/commit/4447dc9d5efed0b05590fc0587170563921cefd6)) - Tyler Vigario, Claude Opus 5.5
+- (**trust**) read and write Claude Code's files as UTF-8 without a BOM (#80) - ([6cee3f8](https://github.com/TylerVigario/greenroom-win/commit/6cee3f830a81e0ec369235dd59aa5593ba6c6bec)) - Tyler Vigario, Claude Opus 5.5
+- (**trust**) decide what is already trusted from the parsed file (#74) - ([16a6bda](https://github.com/TylerVigario/greenroom-win/commit/16a6bda6e11486e91e5b22da283e34a8cff9899b)) - Tyler Vigario, Claude Opus 5.5
+- (**uninstall**) guard the session it runs in, and elevated instances (#77) - ([ceacb6e](https://github.com/TylerVigario/greenroom-win/commit/ceacb6e717820c0b777a57f8aab7e0781d328e88)) - Tyler Vigario, Claude Opus 5.5
+- (**uninstall**) refuse a name that is not an instance's (#71) - ([b30672b](https://github.com/TylerVigario/greenroom-win/commit/b30672bf8d784f8e45cb8493cff4c5aef2f81e38)) - Tyler Vigario, Claude Opus 5.5
+- (**watchdog**) close only the window greenroom recorded (#90) - ([b0f1ac5](https://github.com/TylerVigario/greenroom-win/commit/b0f1ac50ad54f2dd54fa46b67eaf767cbc8604e5)) - Tyler Vigario, Claude Opus 5.5
+- (**watchdog**) adopt only this instance's own session (#87) - ([1b1799c](https://github.com/TylerVigario/greenroom-win/commit/1b1799c6e66719d2e539217d5e1af021a06497e2)) - Tyler Vigario, Claude Opus 5.5
+- (**watchdog**) quote the paths it hands Windows Terminal (#78) - ([b3b5cd6](https://github.com/TylerVigario/greenroom-win/commit/b3b5cd6fbb1ffc53f5dff2136c662ba6bdecabd2)) - Tyler Vigario, Claude Opus 5.5
+- (**watchdog**) close only windows titled exactly as this instance's session (#73) - ([6d25826](https://github.com/TylerVigario/greenroom-win/commit/6d258266b972dcbb3f14c8795e6c1b629212d628)) - Tyler Vigario, Claude Opus 5.5
+#### Documentation
+- (**provisioning**) drop a directory installing no longer writes (#69) - ([b8d9848](https://github.com/TylerVigario/greenroom-win/commit/b8d9848f1ec777e0d74de919d978ca47dde961fe)) - Tyler Vigario, Claude Opus 5.5
+- (**release**) the release environment no longer needs a reviewer (#70) - ([b380ec5](https://github.com/TylerVigario/greenroom-win/commit/b380ec5c349e3cdc07828b0d0aee2dfc13b11045)) - Tyler Vigario, Claude Opus 5.5
+- add issue and pull request templates (#62) - ([7c31c4f](https://github.com/TylerVigario/greenroom-win/commit/7c31c4ff30d570553b06e7cb42d0bf3850d9d8af)) - Tyler Vigario, Claude Opus 5.5
+- add a security policy (#61) - ([4c0ea38](https://github.com/TylerVigario/greenroom-win/commit/4c0ea38a266da5309a74b07e33439ef09a26d0ac)) - Tyler Vigario, Claude Opus 5.5
+#### Tests
+- (**install**) trip on anything install would do, in the tests that expect it to stop (#82) - ([c89d1b7](https://github.com/TylerVigario/greenroom-win/commit/c89d1b7584f73e6cdfc1d216dea66192cfb17ce1)) - Tyler Vigario, Claude Opus 5.5
+#### Continuous Integration
+- block a merge on code scanning alerts (#63) - ([5005d31](https://github.com/TylerVigario/greenroom-win/commit/5005d311a3ed3a8243dee2454266fd7c03cdb761)) - Tyler Vigario, Claude Opus 5.5
+- pin cocogitto by checksum (#60) - ([a0e93f6](https://github.com/TylerVigario/greenroom-win/commit/a0e93f6a64fc2080820bdf0f1dd0d5d7f6c902e9)) - Tyler Vigario, Claude Opus 5.5
+- pin actions by commit (#59) - ([e09d2e4](https://github.com/TylerVigario/greenroom-win/commit/e09d2e4ed61d2e3ada981d3895b6241e71f44c7a)) - Tyler Vigario, Claude Opus 5.5
+
+- - -
+
 ## [v0.6.0](https://github.com/TylerVigario/greenroom-win/compare/b87739cc26bea5ff428bce20f5ddf057f0ef767c..v0.6.0) - 2026-09-25
 #### Features
 - (**session**) carry elevated output back, and show which version runs (#57) - ([b87739c](https://github.com/TylerVigario/greenroom-win/commit/b87739cc26bea5ff428bce20f5ddf057f0ef767c)) - Tyler Vigario, Claude Opus 5.5
