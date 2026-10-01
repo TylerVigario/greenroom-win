@@ -214,6 +214,51 @@ if ($conv.Persist) {
     }
 }
 
-Log "exec: $($cfg.claudeExe) $($claudeArgs -join ' ')"
-& $cfg.claudeExe @claudeArgs
+# THE claude.exe INSTALL RECORDED CAN GO AWAY. Reinstalling Claude Code another way -- WinGet
+# to the native installer, say -- removes the path config.json holds. Run blind, that failed
+# where nobody looks: the error went to this hidden window, launch.log said "claude exited with
+# 0" (a stale exit code), and the watchdog restarted the session into its crash-loop backoff
+# forever. So the path is checked first.
+#   - Chosen with -ClaudeExe: that path or nothing (as at install). FATAL, with the fix.
+#   - Detected: found again the way install found it (Find-ClaudeCode.ps1 next door) and run,
+#     with a warning to re-run install so the new path is recorded and its version checked.
+#     The search uses this process's PATH, inherited from the supervisor's logon: a new
+#     install only reachable through a PATH change made since logon is found after the next
+#     one. ~\.local\bin, the native installer's, is searched regardless.
+$claudeExe = $cfg.claudeExe
+if (-not ($claudeExe -and (Test-Path -LiteralPath $claudeExe))) {
+    if ($cfg.claudeExeExplicit) {
+        Log "FATAL: claude.exe '$claudeExe', chosen with -ClaudeExe at install, does not exist."
+        Log "       Re-run Install-GreenroomInstance -Name $Instance -ClaudeExe <path to claude.exe>, or -ClaudeExe '' to find it automatically."
+        exit 1
+    }
+    . (Join-Path $PSScriptRoot 'Find-ClaudeCode.ps1')
+    $found = Find-ClaudeCode
+    if (-not $found) {
+        Log "FATAL: claude.exe '$claudeExe', found at install, no longer exists, and Claude Code is not on PATH or in ~\.local\bin."
+        Log "       Install Claude Code, then re-run Install-GreenroomInstance -Name $Instance."
+        exit 1
+    }
+    Log "WARN: claude.exe '$claudeExe', found at install, no longer exists -- running '$found' instead."
+    Log "      Re-run Install-GreenroomInstance -Name $Instance to record it and check its version."
+    $claudeExe = $found
+}
+
+Log "exec: $claudeExe $($claudeArgs -join ' ')"
+# A launch that fails -- a path that is not a program -- is an error, not an exit code: with
+# 'Continue' it fell through to the line below and logged whatever $LASTEXITCODE was left.
+# 'Stop' around the call alone makes it catchable. Nothing is redirected -- the TUI needs the
+# console itself -- and a non-zero exit from claude is still just an exit code, not an error.
+$PSNativeCommandUseErrorActionPreference = $false
+try {
+    $ErrorActionPreference = 'Stop'
+    & $claudeExe @claudeArgs
+}
+catch {
+    Log "FATAL: could not run '$claudeExe': $($_.Exception.Message)"
+    exit 1
+}
+finally {
+    $ErrorActionPreference = 'Continue'
+}
 Log "claude exited with $LASTEXITCODE"

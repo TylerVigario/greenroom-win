@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Tyler Vigario
 
+# Where Claude Code is. Lives in Assets/ because the launcher needs the same answer and cannot
+# reach Private/; the module does not load Assets/ on its own.
+. (Join-Path $script:GreenroomModuleRoot 'Assets\Find-ClaudeCode.ps1')
+
 <#
   Resolve and verify everything an instance needs before anything is registered.
 
@@ -27,72 +31,24 @@ function Resolve-GreenroomPrerequisite {
     $wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
     if (-not (Test-Path $wscript)) { throw "wscript.exe not found at $wscript" }
 
-    # Candidate ORDER matters, and PATH decides it. Whatever `claude` resolves to in the
-    # operator's own shell is what the supervised session should run. greenroom does not
-    # install Claude Code, so ranking the ways it can be installed is not its business --
-    # and the list would have to be maintained against someone else's distribution matrix
-    # forever: native, npm, WinGet, two Homebrew casks, apt, dnf, apk.
-    #
-    # A hard-coded WinGet Links entry came FIRST until this changed, justified by that path
-    # being keyed on package ID rather than version, so it survives upgrades. That is true
-    # and not distinctive: EVERY Windows install path for this CLI is version-stable. The
-    # WinGet package directory carries no version segment either, the native launcher at
-    # ~\.local\bin keeps its versions under ~\.local\share\claude\versions, and the npm shim
-    # is fixed as well. So the preference bought nothing the alternatives lacked.
-    #
-    # What it DID do was outrank a newer install silently. A package-manager install caps
-    # itself at whatever the manifest offers -- `claude doctor` says so outright,
-    # "Auto-updates: Managed by package manager" -- so on a host carrying both, greenroom
-    # chose the one that cannot update itself. MEASURED: WinGet at 2.1.268 preferred over a
-    # native 2.1.282 that PATH already ranked first, with a green line and no warning.
-    #
-    # ~\.local\bin stays as a LAST resort, for a native install whose directory is not on
-    # PATH. In the normal case PATH reaches it and this entry is never used.
-    $candidates = @()
-    if ($ClaudeExe) { $candidates += $ClaudeExe }
-    $candidates += (Get-Command claude.exe -All -ErrorAction SilentlyContinue | ForEach-Object Source)
-    $candidates += (Join-Path $env:USERPROFILE '.local\bin\claude.exe')
-
-    # Claude DESKTOP ships its own claude.exe plus a private bundled CLI; neither is a
-    # valid target, and its location depends on install method.
-    $desktopPatterns = @(
-        '*\Program Files\WindowsApps\*',
-        '*\AnthropicClaude\*',
-        '*\AppData\Roaming\Claude\claude-code\*'
-    )
-
     # AN EXPLICIT -ClaudeExe IS THAT PATH OR NOTHING. As one candidate among the others, a
     # choice the filters below reject -- Claude Desktop's bundled claude.exe -- simply
     # dropped out, auto-detection supplied another, and install then recorded THAT path as
     # the explicit choice, pinning it on every later re-run. So it is checked alone, and
     # refused with the reason.
+    # Auto-detection lives in Assets\Find-ClaudeCode.ps1, where the launcher can reach it too.
     if ($ClaudeExe) {
-        foreach ($pat in $desktopPatterns) {
-            if ($ClaudeExe -like $pat) {
-                throw ("-ClaudeExe '$ClaudeExe' is Claude Desktop's bundled claude.exe, not a Claude Code CLI " +
-                       'greenroom can run. Pass the CLI''s path, or omit -ClaudeExe to find it automatically.')
-            }
+        if (Test-ClaudeDesktopPath $ClaudeExe) {
+            throw ("-ClaudeExe '$ClaudeExe' is Claude Desktop's bundled claude.exe, not a Claude Code CLI " +
+                   'greenroom can run. Pass the CLI''s path, or omit -ClaudeExe to find it automatically.')
         }
         if (-not (Test-Path -LiteralPath $ClaudeExe)) { throw "-ClaudeExe '$ClaudeExe' does not exist." }
-        $candidates = @($ClaudeExe)
+        $claude = [System.IO.Path]::GetFullPath($ClaudeExe)
     }
-
-    $seen = @{}
-    $claude = $candidates | Where-Object {
-        if (-not $_) { return $false }
-        if (-not (Test-Path $_)) { return $false }
-        foreach ($pat in $desktopPatterns) { if ($_ -like $pat) { return $false } }
-        $k = $_.ToLower()
-        if ($seen.ContainsKey($k)) { return $false }
-        $seen[$k] = $true
-        return $true
-    } | Select-Object -First 1
-
+    else {
+        $claude = Find-ClaudeCode
+    }
     if (-not $claude) { throw 'Claude Code CLI (claude.exe) not found. Pass -ClaudeExe, or install Claude Code first.' }
-
-    # Deliberately NOT resolved through the symlink: the WinGet Links entry points at a
-    # versioned target, and following it bakes a path that breaks on the next upgrade.
-    $claude = [System.IO.Path]::GetFullPath($claude)
 
     $ver = (& $claude --version 2>&1 | Out-String).Trim()
     if ($ver -notmatch 'Claude Code') {
