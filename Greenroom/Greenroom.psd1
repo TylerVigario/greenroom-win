@@ -12,7 +12,7 @@
 RootModule = 'Greenroom.psm1'
 
 # Version number of this module.
-ModuleVersion = '0.7.0'
+ModuleVersion = '0.7.1'
 
 # Supported PSEditions
 CompatiblePSEditions = 'Core', 'Desktop'
@@ -111,46 +111,12 @@ PrivateData = @{
         IconUri = 'https://raw.githubusercontent.com/TylerVigario/greenroom-win/main/assets/greenroom.png'
 
         # ReleaseNotes of this module
-        ReleaseNotes = '#### Features
-- release: publish the package with provenance (#67)
-#### Bug Fixes
-- ci: forbid moving a published tag (#58)
-- install: an explicit -ClaudeExe is that path or nothing (#84)
-- install: store the working directory as the launcher will land (#76)
-- install: refuse an instance name ending in a dot (#72)
-- launcher: bound launch.log the way watchdog.log is bounded (#85)
-- release: drop the pre-flight gallery key check (#68)
-- release: have GitHub construct the version commit (#66)
-- release: publish before the version is recorded (#65)
-- session: stop only shells running greenroom''s scripts (#91)
-- session: guard only against stopping greenroom''s own session (#89)
-- session: stop only the session greenroom started (#88)
-- session: list only the sessions greenroom started (#86)
-- session: count a process as stopped only when it is gone (#81)
-- session: escalate in the shell greenroom resolves, not pwsh by name (#79)
-- session: elevate before looking for an elevated session (#75)
-- trust: back up ~/.claude.json only when writing it, and keep five (#83)
-- trust: read and write Claude Code''s files as UTF-8 without a BOM (#80)
-- trust: decide what is already trusted from the parsed file (#74)
-- uninstall: guard the session it runs in, and elevated instances (#77)
-- uninstall: refuse a name that is not an instance''s (#71)
-- watchdog: close only the window greenroom recorded (#90)
-- watchdog: adopt only this instance''s own session (#87)
-- watchdog: quote the paths it hands Windows Terminal (#78)
-- watchdog: close only windows titled exactly as this instance''s session (#73)
-#### Documentation
-- provisioning: drop a directory installing no longer writes (#69)
-- release: the release environment no longer needs a reviewer (#70)
-- add issue and pull request templates (#62)
-- add a security policy (#61)
-#### Tests
-- install: trip on anything install would do, in the tests that expect it to stop (#82)
-#### Continuous Integration
-- block a merge on code scanning alerts (#63)
-- pin cocogitto by checksum (#60)
-- pin actions by commit (#59)
+        ReleaseNotes = '#### Bug Fixes
+- launcher: find claude.exe again when the recorded path is gone (#93)
+- release: regenerate the changelog from the whole history (#92)
+- update: flag a missing claude.exe instead of reporting Current (#94)
 
-Full changelog: https://github.com/TylerVigario/greenroom-win/releases/tag/v0.7.0'
+Full changelog: https://github.com/TylerVigario/greenroom-win/releases/tag/v0.7.1'
 
         # Prerelease string of this module
         # Prerelease = ''

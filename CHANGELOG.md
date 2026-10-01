@@ -10,6 +10,14 @@ verbatim. 0.1.0 at the bottom is hand-written and reads "Initial release." becau
 release has no changes to list — there is nothing it changed from.
 
 - - -
+## [v0.7.1](https://github.com/TylerVigario/greenroom-win/compare/v0.7.0..v0.7.1) - 2026-10-01
+#### Bug Fixes
+- (**launcher**) find claude.exe again when the recorded path is gone (#93) - ([dce3f21](https://github.com/TylerVigario/greenroom-win/commit/dce3f21e7f3f9bb992295c010887695d9858dd86)) - Tyler Vigario, Claude Opus 5.5
+- (**release**) regenerate the changelog from the whole history (#92) - ([b5da0d5](https://github.com/TylerVigario/greenroom-win/commit/b5da0d5c7012c582036e09812b8846de3b9944ef)) - Tyler Vigario, Claude Opus 5.5
+- (**update**) flag a missing claude.exe instead of reporting Current (#94) - ([1238943](https://github.com/TylerVigario/greenroom-win/commit/12389431b76483ed0334bb7b31fe35c805954dca)) - Tyler Vigario, Claude Opus 5.5
+
+- - -
+
 ## [v0.7.0](https://github.com/TylerVigario/greenroom-win/compare/v0.6.0..v0.7.0) - 2026-10-01
 #### Features
 - (**release**) publish the package with provenance (#67) - ([1f35b90](https://github.com/TylerVigario/greenroom-win/commit/1f35b901a07a72b8a6718239992557a69240d8d6)) - Tyler Vigario, Claude Opus 5.5
