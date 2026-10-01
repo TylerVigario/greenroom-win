@@ -466,9 +466,16 @@ jobs:
           fi
           echo "main -> $COMMIT"
 
-      # Last, once the tag exists on the server. Notes come from the changelog section cog
-      # just generated, so the Release page and CHANGELOG.md cannot drift apart -- they are
-      # the same text.
+      # Last, once the tag exists on the server. Notes come from the same changelog generator as
+      # CHANGELOG.md, so the Release page and CHANGELOG.md cannot drift apart.
+      #
+      # They are generated from what was RECORDED, not from this checkout. Here the tag is still
+      # cog's local one, on the runner's own bump commit -- which never leaves the runner, since
+      # GitHub constructs the commit that is recorded. Generated from it, the notes' version entry
+      # links a commit that does not exist on GitHub (v0.7.0 cited dfb7913; the recorded commit
+      # is d2bbf37). So the recorded tag replaces the local one, and HEAD moves onto it: cog
+      # finds tags by walking back from HEAD, and with HEAD left on the runner's commit it does
+      # not see the fetched tag at all and dumps the whole history as "Unreleased".
       #
       # Draft first, attach the package, publish last. Releases here are immutable, and
       # publication is where the freeze falls: the tag and the asset cannot change after it.
@@ -479,9 +486,13 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           TAG: ${{ steps.plan.outputs.next }}
+          COMMIT: ${{ steps.construct.outputs.sha }}
           NUPKG: ${{ steps.pack.outputs.nupkg }}
         run: |
           set -euo pipefail
+          git fetch --no-tags origin "+refs/tags/$TAG:refs/tags/$TAG"
+          [ "$(git rev-parse "$TAG^{commit}")" = "$COMMIT" ] || { echo "::error::$TAG on the server is not $COMMIT"; exit 1; }
+          git checkout --quiet --detach "$TAG"
           cog changelog --at "$TAG" > /tmp/notes.md
           gh release create "$TAG" --draft --title "$TAG" --notes-file /tmp/notes.md --verify-tag
           gh release upload "$TAG" "$NUPKG"
