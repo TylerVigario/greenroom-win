@@ -81,13 +81,10 @@ remote = "github.com"
 owner = "TylerVigario"
 repository = "greenroom-win"
 
-# PREPENDING IS A HARD REQUIREMENT and cocogitto does it natively, by looking for a literal
-# `- - -` separator in CHANGELOG.md. Observed on the v0.2.0 release: everything ABOVE the
-# first separator is preserved verbatim -- that is what keeps the preamble -- and the new
-# section is inserted directly beneath it, ahead of the sections already there, which are
-# left alone. So the hand-cut 0.1.0 at the bottom keeps reading "Initial release.", a first
-# release having no changes to list because there is nothing it changed from. v0.2.0 was
-# the first release this machinery generated.
-#
-# Without the separator `cog bump` REFUSES rather than clobbering the file, which was
-# verified rather than assumed.
+# THE SECTION `cog bump` WRITES IS REPLACED. cog bump prepends the new release beneath the
+# first `- - -` separator in CHANGELOG.md, and without the separator it REFUSES rather than
+# clobbering the file (verified), so the separator stays. But that section links its compare
+# range from the release's first commit and is dated by the last change merged
+# (cocogitto/cocogitto#579), so release.yml regenerates the whole file right after the bump,
+# with ci/write-changelog.ps1: a full `cog changelog` between the preamble above the first
+# separator and the hand-cut 0.1.0 below the last one, both kept verbatim.

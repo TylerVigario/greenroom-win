@@ -300,6 +300,22 @@ jobs:
             cog bump --version "$VERSION" --annotated "greenroom-win {{version}}"
           fi
 
+      # THE CHANGELOG IS REGENERATED, NOT TAKEN FROM THE BUMP. The section cog bump writes links
+      # its compare range from the release's first commit instead of the previous tag, and is
+      # dated by the last change merged rather than the release (cocogitto/cocogitto#579). A
+      # full `cog changelog` gets both right -- see ci/write-changelog.ps1. It needs the new
+      # tag on HEAD, so it runs here, and the result is folded into the bump commit before
+      # GitHub is asked to construct it. Nothing leaves the runner, so this runs on a dry run.
+      - name: Regenerate the changelog
+        env:
+          TAG: ${{ steps.plan.outputs.next }}
+        run: |
+          set -euo pipefail
+          pwsh -NoProfile -File ./ci/write-changelog.ps1
+          git add CHANGELOG.md
+          git commit --amend --no-edit --quiet
+          git tag --force --annotate "$TAG" --message "greenroom-win ${TAG#v}" >/dev/null
+
       # GITHUB BUILDS THE COMMIT THAT GETS RECORDED. A commit pushed from here would arrive
       # unsigned whatever token pushed it; one GitHub constructs through the API, given no
       # author, committer or signature, carries GitHub's signature. createCommitOnBranch
@@ -466,16 +482,13 @@ jobs:
           fi
           echo "main -> $COMMIT"
 
-      # Last, once the tag exists on the server. Notes come from the same changelog generator as
-      # CHANGELOG.md, so the Release page and CHANGELOG.md cannot drift apart.
-      #
-      # They are generated from what was RECORDED, not from this checkout. Here the tag is still
-      # cog's local one, on the runner's own bump commit -- which never leaves the runner, since
-      # GitHub constructs the commit that is recorded. Generated from it, the notes' version entry
-      # links a commit that does not exist on GitHub (v0.7.0 cited dfb7913; the recorded commit
-      # is d2bbf37). So the recorded tag replaces the local one, and HEAD moves onto it: cog
-      # finds tags by walking back from HEAD, and with HEAD left on the runner's commit it does
-      # not see the fetched tag at all and dumps the whole history as "Unreleased".
+      # Last, once the tag exists on the server. The notes ARE the new release's section of
+      # CHANGELOG.md, cut from the file this run regenerated -- the file in the tree GitHub was
+      # checked to have built, byte for byte -- so the Release page and CHANGELOG.md cannot
+      # drift apart. Rendering them again with `cog changelog --at` would bring back both
+      # faults the regeneration exists to fix (the first-commit compare link and, from this
+      # checkout, a version entry citing the runner's own bump commit, which never exists on
+      # GitHub: v0.7.0's notes cited dfb7913 for the recorded d2bbf37).
       #
       # Draft first, attach the package, publish last. Releases here are immutable, and
       # publication is where the freeze falls: the tag and the asset cannot change after it.
@@ -486,14 +499,12 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           TAG: ${{ steps.plan.outputs.next }}
-          COMMIT: ${{ steps.construct.outputs.sha }}
           NUPKG: ${{ steps.pack.outputs.nupkg }}
         run: |
           set -euo pipefail
-          git fetch --no-tags origin "+refs/tags/$TAG:refs/tags/$TAG"
-          [ "$(git rev-parse "$TAG^{commit}")" = "$COMMIT" ] || { echo "::error::$TAG on the server is not $COMMIT"; exit 1; }
-          git checkout --quiet --detach "$TAG"
-          cog changelog --at "$TAG" > /tmp/notes.md
+          # From this release's heading to the separator that ends its section.
+          awk -v h="## [$TAG]" 'index($0, h) == 1 { on = 1 } on && $0 == "- - -" { exit } on' CHANGELOG.md > /tmp/notes.md
+          [ -s /tmp/notes.md ] || { echo "::error::no $TAG section in CHANGELOG.md"; exit 1; }
           gh release create "$TAG" --draft --title "$TAG" --notes-file /tmp/notes.md --verify-tag
           gh release upload "$TAG" "$NUPKG"
           gh release edit "$TAG" --draft=false
