@@ -49,6 +49,9 @@
                  the old code until it next starts
     Current      already runs this version, untouched
     Unversioned  runs from a path carrying no version, untouched (-Force re-registers)
+    ClaudeMissing  would be Current or Unversioned, but the claude.exe its config.json records
+                 no longer exists, so it cannot start a session; untouched, and a warning
+                 says how to fix it (-Force re-registers, which finds Claude Code again)
     Failed       re-registration failed and the instance stays on From; the error says why
 
   From is the version the task ran before, To the version loaded here. Nothing is emitted
@@ -118,6 +121,24 @@ function Update-GreenroomInstance {
         $asset = Get-InstanceAssetVersion -Name $n
 
         if (-not $Force) {
+            # Before calling an instance left alone fine: is the claude.exe it runs still there?
+            # Reinstalling Claude Code another way removes it, and such an instance was reported
+            # Current while it could not start a session. An instance that is behind is
+            # re-registered below anyway, which looks Claude Code up again.
+            if (-not $asset -or $asset -eq $to) {
+                $gone = Get-MissingClaudeExe -Name $n
+                if ($gone) {
+                    Write-Warning $(if ($gone.Explicit) {
+                        "'$n' cannot start a session: claude.exe '$($gone.Path)', chosen with -ClaudeExe, no longer exists. " +
+                        "Re-run Install-GreenroomInstance -Name $n -ClaudeExe <path to claude.exe>, or -ClaudeExe '' to find it automatically."
+                    } else {
+                        "'$n': claude.exe '$($gone.Path)', found at install, no longer exists. " +
+                        "Update-GreenroomInstance -Name $n -Force re-registers it, which finds Claude Code again."
+                    })
+                    & $result $n 'ClaudeMissing' $asset $null
+                    continue
+                }
+            }
             if (-not $asset) {
                 # Not an error and not behind: a module installed somewhere unversioned,
                 # where new files land in place and there is nothing to move.

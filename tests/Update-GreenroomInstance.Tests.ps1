@@ -27,6 +27,7 @@ Describe 'Update-GreenroomInstance' {
             )
         }
         Mock -ModuleName Greenroom Install-GreenroomInstance { }
+        Mock -ModuleName Greenroom Get-MissingClaudeExe { $null }
         Mock -ModuleName Greenroom Restart-GreenroomSession { }
         # alpha is behind, beta is current. $script:Loaded, not $script:GreenroomModuleVersion:
         # a mock body runs in THIS file's scope, where the module's variable is $null -- which
@@ -141,6 +142,7 @@ Describe 'Update-GreenroomInstance results' {
             )
         }
         Mock -ModuleName Greenroom Install-GreenroomInstance { }
+        Mock -ModuleName Greenroom Get-MissingClaudeExe { $null }
         Mock -ModuleName Greenroom Restart-GreenroomSession {
             [PSCustomObject]@{ PSTypeName = 'Greenroom.Instance'; Instance = $Name; ClaudePid = 4242 }
         }
@@ -200,5 +202,96 @@ Describe 'Update-GreenroomInstance results' {
         $view = Get-FormatData -TypeName 'Greenroom.UpdateResult'
         $view | Should -Not -BeNullOrEmpty
         $view.FormatViewDefinition[0].Control.Headers.Label | Should -Contain 'Action'
+    }
+}
+
+Describe 'Update-GreenroomInstance, when the recorded claude.exe is gone' {
+
+    # Reinstalling Claude Code another way removes the path config.json records. An instance on
+    # the current version was reported Current while it could not start a session.
+
+    BeforeEach {
+        Mock -ModuleName Greenroom Get-ScheduledTask {
+            @([PSCustomObject]@{ TaskName = 'greenroom-alpha' }, [PSCustomObject]@{ TaskName = 'greenroom-beta' })
+        }
+        Mock -ModuleName Greenroom Install-GreenroomInstance { }
+        Mock -ModuleName Greenroom Restart-GreenroomSession { }
+        Mock -ModuleName Greenroom Get-InstanceAssetVersion { $script:Loaded }
+        Mock -ModuleName Greenroom Get-MissingClaudeExe {
+            if ($Name -eq 'beta') { [PSCustomObject]@{ Path = 'C:\gone\claude.exe'; Explicit = $false } }
+        }
+    }
+
+    It 'reports ClaudeMissing, not Current, and says how to fix it' {
+        $r = @(Update-GreenroomInstance -WarningVariable w -WarningAction SilentlyContinue)
+        ($r | Where-Object Instance -eq 'alpha').Action | Should -Be 'Current'
+        ($r | Where-Object Instance -eq 'beta').Action  | Should -Be 'ClaudeMissing'
+        "$w" | Should -Match ([regex]::Escape("'beta': claude.exe 'C:\gone\claude.exe', found at install, no longer exists"))
+        "$w" | Should -Match ([regex]::Escape('Update-GreenroomInstance -Name beta -Force'))
+        Should -Invoke -ModuleName Greenroom Install-GreenroomInstance -Times 0
+    }
+
+    It 'points an explicitly chosen path at -ClaudeExe' {
+        Mock -ModuleName Greenroom Get-MissingClaudeExe {
+            if ($Name -eq 'beta') { [PSCustomObject]@{ Path = 'C:\gone\claude.exe'; Explicit = $true } }
+        }
+        $null = Update-GreenroomInstance -WarningVariable w -WarningAction SilentlyContinue
+        "$w" | Should -Match ([regex]::Escape("'beta' cannot start a session"))
+        "$w" | Should -Match ([regex]::Escape("-ClaudeExe '' to find it automatically"))
+    }
+
+    It 'reports ClaudeMissing for an unversioned instance too' {
+        Mock -ModuleName Greenroom Get-InstanceAssetVersion { $null }
+        (@(Update-GreenroomInstance -WarningAction SilentlyContinue) | Where-Object Instance -eq 'beta').Action |
+            Should -Be 'ClaudeMissing'
+    }
+
+    It 'still re-registers an instance that is behind -- that looks Claude Code up again' {
+        Mock -ModuleName Greenroom Get-InstanceAssetVersion { [version]'0.0.1' }
+        $r = @(Update-GreenroomInstance -WarningAction SilentlyContinue)
+        ($r | Where-Object Instance -eq 'beta').Action | Should -Be 'Updated'
+        Should -Invoke -ModuleName Greenroom Install-GreenroomInstance -Times 1 -Exactly -ParameterFilter { $Name -eq 'beta' }
+    }
+
+    It 're-registers it under -Force, which is the fix the warning names' {
+        $null = Update-GreenroomInstance -Name beta -Force
+        Should -Invoke -ModuleName Greenroom Install-GreenroomInstance -Times 1 -Exactly -ParameterFilter { $Name -eq 'beta' }
+    }
+}
+
+Describe 'Get-MissingClaudeExe' {
+
+    BeforeEach {
+        $script:Root = (New-Item -ItemType Directory -Path (Join-Path $TestDrive ([guid]::NewGuid().ToString('N')))).FullName
+        Mock -ModuleName Greenroom Get-GreenroomStateRoot { $script:Root }
+        $script:Present = Join-Path $script:Root 'claude.exe'
+        Set-Content -LiteralPath $script:Present -Value 'x'
+        function Config($Value) {
+            $d = New-Item -ItemType Directory -Path (Join-Path $script:Root 'probe') -Force
+            if ($Value -is [string]) { Set-Content (Join-Path $d 'config.json') $Value }
+            else { $Value | ConvertTo-Json | Set-Content (Join-Path $d 'config.json') }
+        }
+        function Ask { InModuleScope Greenroom { Get-MissingClaudeExe -Name probe } }
+    }
+
+    It 'returns the path, and whether it was chosen, when it no longer exists' {
+        Config @{ claudeExe = (Join-Path $script:Root 'gone\claude.exe'); claudeExeExplicit = $true }
+        $r = Ask
+        $r.Path | Should -Be (Join-Path $script:Root 'gone\claude.exe')
+        $r.Explicit | Should -BeTrue
+    }
+
+    It 'returns nothing when <Why>' -ForEach @(
+        @{ Why = 'the path exists'; Kind = 'present' }
+        @{ Why = 'there is no config'; Kind = 'none' }
+        @{ Why = 'the config is unreadable'; Kind = 'broken' }
+        @{ Why = 'the config records no claude.exe'; Kind = 'empty' }
+    ) {
+        switch ($Kind) {
+            'present' { Config @{ claudeExe = $script:Present; claudeExeExplicit = $false } }
+            'broken'  { Config '{ not json' }
+            'empty'   { Config @{ workingDirectory = 'D:\w' } }
+        }
+        Ask | Should -BeNullOrEmpty
     }
 }
