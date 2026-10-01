@@ -142,6 +142,55 @@ function Assert-ClaudeModel {
 }
 
 <#
+  Where Claude Code will find Git Bash, or $null -- its documented lookup, in its order
+  (https://code.claude.com/docs/en/troubleshoot-install):
+
+    1. CLAUDE_CODE_GIT_BASH_PATH, when it names an existing file called bash.exe, sh.exe, bash
+       or sh. Any other value is ignored, as Claude Code ignores it.
+    2. The default install locations, C:\Program Files\Git and C:\Program Files (x86)\Git.
+    3. The git on PATH, using the bin\bash.exe of that Git installation.
+
+  Not found, Claude Code does not fail: its Bash tool falls back to the PowerShell tool.
+
+  The inputs are parameters so the lookup can be tested without the host's own Git.
+  -Variable takes the variable's values in precedence order; -PathDir the PATH folders.
+#>
+function Find-GitBash {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [string[]]$Variable = @(),
+        [string[]]$InstallRoot = @(
+            $(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles 'Git' }),
+            $(if (${env:ProgramFiles(x86)}) { Join-Path ${env:ProgramFiles(x86)} 'Git' })
+        ),
+        [string[]]$PathDir = @()
+    )
+
+    foreach ($v in $Variable) {
+        if ($v -and (Split-Path $v -Leaf) -in 'bash.exe', 'sh.exe', 'bash', 'sh' -and (Test-Path -LiteralPath $v -PathType Leaf)) {
+            return $v
+        }
+    }
+    foreach ($root in $InstallRoot | Where-Object { $_ }) {
+        $bash = Join-Path $root 'bin\bash.exe'
+        if (Test-Path -LiteralPath $bash -PathType Leaf) { return $bash }
+    }
+    # git.exe sits in Git\cmd, Git\bin or Git\mingw64\bin: the installation is the nearest
+    # folder above it that has bin\bash.exe.
+    foreach ($dir in $PathDir | Where-Object { $_ }) {
+        if (-not (Test-Path -LiteralPath (Join-Path $dir 'git.exe') -PathType Leaf)) { continue }
+        $up = $dir
+        for ($i = 0; $i -lt 3 -and $up; $i++) {
+            $bash = Join-Path $up 'bin\bash.exe'
+            if (Test-Path -LiteralPath $bash -PathType Leaf) { return $bash }
+            $up = Split-Path $up -Parent
+        }
+    }
+    $null
+}
+
+<#
   Warn about host settings that break a supervised session invisibly.
 
   Advisory only -- none of these are fatal, and none are greenroom's to fix. They go to
@@ -158,38 +207,35 @@ function Test-GreenroomHostSetting {
     try { $s = Get-Content $settings -Raw | ConvertFrom-Json }
     catch { Write-Warning "could not parse $settings"; return }
 
-    # Git for Windows puts Git\cmd and Git\mingw64\bin on PATH but NOT Git\bin, which
-    # is where bash.exe lives -- so a stock install satisfies `git` and fails `bash`,
-    # and every Bash tool call then fails silently in a hidden window.
+    # Claude Code's Bash tool runs Git Bash. A check that only asked whether bash.exe is on PATH
+    # warned on hosts where it plainly works -- Git for Windows puts Git\cmd on PATH, not
+    # Git\bin, and Claude Code does not need either -- and told the operator to edit PATH. So
+    # this asks Claude Code's own question (Find-GitBash), with what a task-launched session
+    # will see: settings.json's env, the environment from the registry and this process, and
+    # PATH from both.
     if ($s.defaultShell -eq 'bash') {
-        $inProc = Get-Command bash -ErrorAction SilentlyContinue
+        $machineEnv = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment'
+        $var = 'CLAUDE_CODE_GIT_BASH_PATH'
+        $variable = @(
+            $(if ($s.env) { $s.env.$var }),
+            [Environment]::GetEnvironmentVariable($var),
+            (Get-ItemProperty 'HKCU:\Environment' -Name $var -ErrorAction SilentlyContinue).$var,
+            (Get-ItemProperty $machineEnv -Name $var -ErrorAction SilentlyContinue).$var
+        ) | Where-Object { $_ }
+        $machinePath = (Get-ItemProperty $machineEnv -Name Path -ErrorAction SilentlyContinue).Path
+        $userPath    = (Get-ItemProperty 'HKCU:\Environment' -Name Path -ErrorAction SilentlyContinue).Path
+        $pathDirs = @(([Environment]::ExpandEnvironmentVariables("$machinePath;$userPath") + ";$env:Path") -split ';' |
+                      Where-Object { $_ })
 
-        # Build the PATH a NEW process would get, from the registry. This process may
-        # hold a stale environment block, and that false negative is otherwise
-        # indistinguishable from a real failure.
-        $machine = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment' -Name Path).Path
-        $user    = (Get-ItemProperty 'HKCU:\Environment' -Name Path -ErrorAction SilentlyContinue).Path
-        $fresh   = [Environment]::ExpandEnvironmentVariables(($machine.TrimEnd(';') + ';' + $user))
-        $freshHit = ($fresh -split ';') |
-                    Where-Object { $_ -and (Test-Path (Join-Path $_ 'bash.exe')) } | Select-Object -First 1
-
-        if ($inProc -and $freshHit) {
-            Write-Verbose "shell: bash -> $($inProc.Source)"
-        }
-        elseif ($freshHit) {
-            Write-Warning ("bash resolves in the registry PATH ($freshHit) but not in THIS process, which " +
-                           'holds a stale environment block. A task-launched session will be fine.')
+        $bash = Find-GitBash -Variable $variable -PathDir $pathDirs
+        if ($bash) {
+            Write-Verbose "shell: bash -> $bash"
         }
         else {
-            $msg = 'defaultShell is "bash" but bash.exe does not resolve on PATH. Every Bash tool call will fail silently in a hidden window.'
-            $git = (Get-Command git.exe -ErrorAction SilentlyContinue).Source
-            if ($git) {
-                $gitBin = Join-Path (Split-Path (Split-Path $git)) 'bin'
-                if (Test-Path (Join-Path $gitBin 'bash.exe')) {
-                    $msg += " Add '$gitBin' to your USER PATH. Do NOT add Git\usr\bin -- it also has bash but shadows Windows echo/find/sort/tee and breaks scripts."
-                }
-            }
-            Write-Warning $msg
+            Write-Warning ('defaultShell is "bash", but Claude Code will find no Git Bash, so its Bash tool falls back to ' +
+                           'PowerShell: CLAUDE_CODE_GIT_BASH_PATH names no bash.exe that exists, Git for Windows is not ' +
+                           'under Program Files, and no git on PATH has a bin\bash.exe beside it. Install Git for Windows, ' +
+                           'or set CLAUDE_CODE_GIT_BASH_PATH in the env block of ~\.claude\settings.json.')
         }
     }
 
