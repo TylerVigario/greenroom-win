@@ -12,7 +12,7 @@
 RootModule = 'Greenroom.psm1'
 
 # Version number of this module.
-ModuleVersion = '0.7.1'
+ModuleVersion = '0.7.2'
 
 # Supported PSEditions
 CompatiblePSEditions = 'Core', 'Desktop'
@@ -112,11 +112,10 @@ PrivateData = @{
 
         # ReleaseNotes of this module
         ReleaseNotes = '#### Bug Fixes
-- launcher: find claude.exe again when the recorded path is gone (#93)
-- release: regenerate the changelog from the whole history (#92)
-- update: flag a missing claude.exe instead of reporting Current (#94)
+- install: look for Git Bash where Claude Code does (#96)
+- install: warn about elevation once, not twice (#95)
 
-Full changelog: https://github.com/TylerVigario/greenroom-win/releases/tag/v0.7.1'
+Full changelog: https://github.com/TylerVigario/greenroom-win/releases/tag/v0.7.2'
 
         # Prerelease string of this module
         # Prerelease = ''

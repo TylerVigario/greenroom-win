@@ -10,6 +10,13 @@ verbatim. 0.1.0 at the bottom is hand-written and reads "Initial release." becau
 release has no changes to list — there is nothing it changed from.
 
 - - -
+## [v0.7.2](https://github.com/TylerVigario/greenroom-win/compare/v0.7.1..v0.7.2) - 2026-10-01
+#### Bug Fixes
+- (**install**) look for Git Bash where Claude Code does (#96) - ([d38e1bc](https://github.com/TylerVigario/greenroom-win/commit/d38e1bc53553595b3d6e3491d1a3b218593fadd4)) - Tyler Vigario, Claude Opus 5.5
+- (**install**) warn about elevation once, not twice (#95) - ([e71b195](https://github.com/TylerVigario/greenroom-win/commit/e71b195f91a687a55b18f10d2544c7fe08d4d572)) - Tyler Vigario, Claude Opus 5.5
+
+- - -
+
 ## [v0.7.1](https://github.com/TylerVigario/greenroom-win/compare/v0.7.0..v0.7.1) - 2026-10-01
 #### Bug Fixes
 - (**launcher**) find claude.exe again when the recorded path is gone (#93) - ([dce3f21](https://github.com/TylerVigario/greenroom-win/commit/dce3f21e7f3f9bb992295c010887695d9858dd86)) - Tyler Vigario, Claude Opus 5.5
