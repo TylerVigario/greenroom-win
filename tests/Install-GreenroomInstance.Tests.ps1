@@ -90,9 +90,17 @@ Describe 'Resolve-InstallParameter' {
             (Resolve).AdditionalDirectories | Should -Be @($script:WorkDir)
         }
 
-        It 'keeps elevation' {
+        It 'keeps elevation, and says it was kept -- leaving the warning to Install' {
             WritePrevConfig @{ workingDirectory = 'D:\real-work'; elevated = $true }
-            (Resolve -Bound @{} ).Elevated | Should -BeTrue
+            $r = Resolve -Bound @{} -WarningVariable w -WarningAction SilentlyContinue
+            $r.Elevated | Should -BeTrue
+            $r.ElevatedKept | Should -BeTrue
+            $w | Should -BeNullOrEmpty
+        }
+
+        It 'does not call elevation kept when it was asked for' {
+            WritePrevConfig @{ workingDirectory = 'D:\real-work'; elevated = $true }
+            (Resolve -Bound @{ Elevated = $true } -Extra @{ Elevated = $true }).ElevatedKept | Should -BeFalse
         }
 
         It 'keeps an explicitly chosen claude.exe, and the fact that it was chosen' {
@@ -284,6 +292,39 @@ Describe 'Install-GreenroomInstance' {
         Mock -ModuleName Greenroom Register-GreenroomTask { throw 'must not get this far' }
         { Install-GreenroomInstance -Name probe -Elevated -ErrorAction Stop } | Should -Throw '*elevated caller*'
         Should -Invoke -ModuleName Greenroom Register-GreenroomTask -Times 0
+    }
+}
+
+Describe 'Install-GreenroomInstance, elevated' {
+
+    # One warning about elevation, not two: a re-run that kept it once warned "keeping
+    # ELEVATED" and then "runs ELEVATED", each naming the same revoke flag, on every update.
+    BeforeEach {
+        InstallTripwires
+        Mock -ModuleName Greenroom Test-SelfElevated { $true }
+        Mock -ModuleName Greenroom Resolve-GreenroomPrerequisite {
+            [PSCustomObject]@{ WindowsTerminal = 'C:\wt.exe'; Shell = 'C:\pwsh.exe'; WScript = 'C:\wscript.exe'
+                               ClaudeExe = 'C:\claude.exe'; ClaudeVersion = '2.1.300 (Claude Code)' }
+        }
+        foreach ($c in 'Set-ProjectTrust', 'Set-ProjectGrant', 'Register-GreenroomTask', 'Test-TrustSurvived') {
+            Mock -ModuleName Greenroom $c { }
+        }
+        WritePrevConfig @{ workingDirectory = $script:WorkDir; elevated = $true }
+    }
+
+    It 'warns once, saying it was kept, when a re-run keeps elevation' {
+        $null = Install-GreenroomInstance -Name probe -NoStart -Confirm:$false -WarningVariable w -WarningAction SilentlyContinue
+        $elevation = @($w | Where-Object { "$_" -match 'ELEVATED' })
+        $elevation.Count | Should -Be 1
+        "$($elevation[0])" | Should -Match ([regex]::Escape("'probe' runs ELEVATED (kept from its previous install)."))
+        "$($elevation[0])" | Should -Match ([regex]::Escape('-Elevated:$false'))
+    }
+
+    It 'warns once, without "kept", when elevation is asked for' {
+        $null = Install-GreenroomInstance -Name probe -Elevated -NoStart -Confirm:$false -WarningVariable w -WarningAction SilentlyContinue
+        $elevation = @($w | Where-Object { "$_" -match 'ELEVATED' })
+        $elevation.Count | Should -Be 1
+        "$($elevation[0])" | Should -Not -Match 'kept'
     }
 }
 

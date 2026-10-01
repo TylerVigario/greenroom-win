@@ -108,11 +108,14 @@ function Resolve-InstallParameter {
                "from one -- its trust dialog repeats forever. Use a directory inside it, e.g. $(Join-Path $env:USERPROFILE $Name).")
     }
 
-    # Elevation inherits like the rest, but ANNOUNCES itself every time rather than
-    # only under -Verbose, because it is security-relevant.
+    # Elevation inherits like the rest, but is ANNOUNCED every time rather than only under
+    # -Verbose, because it is security-relevant. Install-GreenroomInstance says it, once, for
+    # every elevated instance; ElevatedKept lets it add that this came from the previous
+    # install. A second warning here repeated the same revoke flag on every update.
+    $elevatedKept = $false
     if (-not $Bound.ContainsKey('Elevated') -and $prev -and $prev.elevated) {
         $Elevated = $true
-        Write-Warning "keeping ELEVATED from the previous install of '$Name'. Pass -Elevated:`$false to drop it."
+        $elevatedKept = $true
     }
 
     if (-not $Bound.ContainsKey('TriggerDelay')) {
@@ -196,6 +199,7 @@ function Resolve-InstallParameter {
         TriggerDelay          = $TriggerDelay
         AdditionalDirectories = $grants
         Elevated              = $Elevated
+        ElevatedKept          = $elevatedKept
         Model                 = $Model
     }
 }

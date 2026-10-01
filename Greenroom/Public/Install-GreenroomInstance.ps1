@@ -180,8 +180,11 @@ function Install-GreenroomInstance {
         Register-GreenroomTask -Name $s.Instance -WorkingDirectory $s.WorkingDirectory `
             -TriggerDelay $s.TriggerDelay -WScriptPath $pre.WScript -Elevated $s.Elevated
 
+        # The one announcement of elevation, made whether it was asked for or kept from the
+        # previous install -- see Resolve-InstallParameter.
         if ($s.Elevated) {
-            Write-Warning ("'$($s.Instance)' runs ELEVATED. Showing and hiding it now need an elevated shell too: " +
+            $kept = if ($s.ElevatedKept) { ' (kept from its previous install)' } else { '' }
+            Write-Warning ("'$($s.Instance)' runs ELEVATED$kept. Showing and hiding it now need an elevated shell too: " +
                            'UIPI blocks the window calls from a lower integrity level. Nothing on screen marks ' +
                            "the session as elevated -- Get-GreenroomInstance is how you tell. Revoke with " +
                            "Install-GreenroomInstance -Name $($s.Instance) -Elevated:`$false")
