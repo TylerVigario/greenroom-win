@@ -14,12 +14,45 @@
   hand and remember not to start anything, which is the procedure the module exists to
   replace.
 
-  The case that makes it necessary is an upgrade of the Claude Code CLI itself. The
-  session holds claude.exe open, and on a WinGet install every session runs through the
-  same WinGet\Links\claude.exe symlink into one package file. MEASURED: with a session
-  running, `winget upgrade --id Anthropic.ClaudeCode` fails with 0x8a150003 and
-  `remove: Access is denied` against that package file. Hiding the window does not
-  release it, and restarting only re-takes it.
+  The case this was WRITTEN for is an upgrade of the Claude Code CLI, and it depends on
+  how the CLI was installed. Both halves below are measured; the WinGet one still
+  applies, and this paragraph used to generalise it to every install.
+
+  MEASURED, on a probe process holding its own image, which is the Windows rule the rest
+  of this follows from:
+
+    overwrite in place / open for write / truncate   FAIL, "being used by another process"
+    delete                                          FAIL, "Access to the path ... is denied"
+    RENAME                                          SUCCEEDS
+    create a new file at the freed path              SUCCEEDS
+    delete the renamed original, still running       FAIL -- succeeds once it exits
+
+  So a running executable cannot be overwritten or deleted, but it CAN be renamed out of
+  the way. One rule, and two installers that pick different sides of it.
+
+  WinGet REMOVES. Every session runs through one WinGet\Links\claude.exe symlink into a
+  single package file, and MEASURED: with a session running,
+  `winget upgrade --id Anthropic.ClaudeCode` fails with 0x8a150003 and
+  `remove: Access is denied` against that package file -- the delete row above. Hiding
+  the window does not release the handle and restarting only re-takes it, so on a WinGet
+  install this command is the workaround, exactly as originally written. The package is
+  still published: `winget show --id Anthropic.ClaudeCode` resolves.
+
+  The NATIVE updater RENAMES, so it needs no downtime at all. MEASURED 2026-11-09 with
+  five sessions up: ~\.local\bin\claude.exe was renamed to
+  claude.exe.old.1794251994594.15092 at 11:19:54 -- an epoch-ms stamp and the pid of a
+  session holding it -- and the new 346,487,456-byte build was written at the freed path,
+  with .last-update-result.json recording {"outcome":"success","path":"native"}. Sessions
+  that started before the rename keep executing the renamed bytes; the orphan is
+  329 MB and CANNOT be deleted while any of them maps it.
+
+  Two things follow that are easy to get backwards. `claude --version` starts a NEW
+  process from the path, so it reports what is on DISK, not what a running session is
+  executing. And on a native install, reaching for this command to make an upgrade safe
+  buys nothing.
+
+  What the command is still for, on every install: the gap in the first paragraph --
+  taking an instance down deliberately and having it STAY down. Nothing else does that.
 
   Order matters, and it is the same order Restart uses for the same reason. The watchdog
   goes first: it polls once a second and restarts a dead session, so killing the session
@@ -70,13 +103,20 @@
 .EXAMPLE
   $running = (Get-GreenroomInstance).Instance
   $running | Stop-GreenroomSession
-  winget upgrade --id Anthropic.ClaudeCode
+  # ...whatever actually needs every session down...
   $running | Start-GreenroomSession
-  Taking every instance down to upgrade the CLI they all hold open. Capture the names
+  Taking every instance down and bringing back exactly what was up. Capture the names
   FIRST: Get-GreenroomInstance lists running sessions only, so once they are stopped it
-  returns nothing. Note that a Claude Code session you are typing in holds the same
-  binary, so this frees it only if the shell running these commands is not itself inside
-  one.
+  returns nothing, and capturing is also what avoids starting an instance that was down
+  on purpose. Note that a Claude Code session you are typing in holds the same binary,
+  so this frees it only if the shell running these commands is not itself inside one.
+
+  The middle line is a placeholder because the right command depends on the install.
+  `winget upgrade --id Anthropic.ClaudeCode` belongs there on a WinGet install, where
+  the package file is locked by every running session. On a native install nothing
+  belongs there, because the updater renames rather than removes and needs no downtime.
+  See the DESCRIPTION. Either way the capture-first lesson is the point of the example,
+  not the command in the middle.
 #>
 function Stop-GreenroomSession {
     [CmdletBinding(SupportsShouldProcess)]
