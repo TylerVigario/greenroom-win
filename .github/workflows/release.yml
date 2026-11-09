@@ -52,7 +52,7 @@ name: Release
 #   2. Installed on greenroom-win only.
 #      AN INSTALLATION DOES NOT TRAVEL WITH A REPOSITORY TRANSFER. It belongs to the
 #      account that installed it, so moving the repository between owners leaves it
-#      behind. MEASURED on the move out of the Vigario-Technology-Solutions org: the
+#      behind. MEASURED when this repository moved to its current owner: the
 #      credentials were still valid -- the App JWT was accepted -- and the mint failed
 #      anyway with `Integration not found`, a 404 from
 #      GET /repos/<owner>/<repo>/installation. Re-install on the new owner.
