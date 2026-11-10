@@ -14,9 +14,8 @@
   hand and remember not to start anything, which is the procedure the module exists to
   replace.
 
-  The case this was WRITTEN for is an upgrade of the Claude Code CLI, and it depends on
-  how the CLI was installed. Both halves below are measured; the WinGet one still
-  applies, and this paragraph used to generalise it to every install.
+  The case that makes it necessary is an upgrade of the Claude Code CLI -- and whether it
+  does depends on how the CLI was installed. Both halves below are measured.
 
   MEASURED, on a probe process holding its own image, which is the Windows rule the rest
   of this follows from:
@@ -35,8 +34,8 @@
   `winget upgrade --id Anthropic.ClaudeCode` fails with 0x8a150003 and
   `remove: Access is denied` against that package file -- the delete row above. Hiding
   the window does not release the handle and restarting only re-takes it, so on a WinGet
-  install this command is the workaround, exactly as originally written. The package is
-  still published: `winget show --id Anthropic.ClaudeCode` resolves.
+  install this command is the workaround. The package is still published:
+  `winget show --id Anthropic.ClaudeCode` resolves.
 
   The NATIVE updater RENAMES, so it needs no downtime at all. MEASURED 2026-11-09 with
   five sessions up: ~\.local\bin\claude.exe was renamed to
@@ -51,7 +50,7 @@
   executing. And on a native install, reaching for this command to make an upgrade safe
   buys nothing.
 
-  What the command is still for, on every install: the gap in the first paragraph --
+  What the command is for on every install is the gap in the first paragraph --
   taking an instance down deliberately and having it STAY down. Nothing else does that.
 
   Order matters, and it is the same order Restart uses for the same reason. The watchdog

@@ -83,8 +83,7 @@ the duplicate from doing damage, but the tidy route is `Restart-GreenroomSession
 
 ## Upgrading the Claude Code CLI
 
-**Whether you need downtime depends on how the CLI was installed**, and this section
-gave the WinGet answer for both until 2026-11-09.
+**Whether you need downtime depends on how the CLI was installed.**
 
 ### The Windows rule everything here follows from
 
@@ -139,9 +138,9 @@ Three consequences worth knowing:
   deletable when nothing maps it. Whether anything sweeps a stale `.old.*` later is
   **not established**. On a host with always-on sessions, budget for it.
 
-### Taking every instance down, when something actually needs it
+### Taking every instance down, when something needs it
 
-The pattern is still worth knowing, because the mistake in it is easy to make:
+The pattern is worth knowing, because the mistake in it is easy to make:
 
 ```powershell
 $running = (Get-GreenroomInstance).Instance
@@ -151,9 +150,9 @@ $running | Start-GreenroomSession
 ```
 
 **Capture the names first.** `Get-GreenroomInstance` lists *running* sessions, so once
-they are stopped it returns nothing. The 0.4.0 version of this procedure piped a fresh
-`Get-GreenroomInstance` into the restart, which therefore brought nothing back. Capturing
-also restores exactly what was running, and not an instance that was down on purpose.
+they are stopped it returns nothing -- so piping a fresh `Get-GreenroomInstance` into the
+restart brings nothing back. Capturing also restores exactly what was running, and not an
+instance that was down on purpose.
 `Stop-GreenroomSession *` and `Start-GreenroomSession *` are the blunter alternative: every
 registered instance, including one that was down on purpose before you started.
 
