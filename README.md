@@ -19,17 +19,11 @@ stage the moment you want them.
 Several instances run side by side on one host, each with its own working
 directory, its own directory grants, and its own name in the Remote Control UI.
 
-> **Status: in development.** Every `0.x` release is initial development in the
-> sense semver means it — anything may change, and the surface is not stable — so
-> a command that exists today may not exist, or may not behave the same way, in
-> the next minor.
->
-> That is enforced rather than promised: while the major is zero a breaking change
-> bumps the minor, so reaching `1.0.0` cannot happen by accident. It takes someone
-> deciding the surface is worth keeping.
->
-> `1.0.0` will mean the surface has stopped moving, not that the feature list is
-> finished — a condition to be met rather than a date to arrive at.
+> **Status: in development.** `0.x` is initial development in the sense semver
+> means it: a command that exists today may not exist, or may not behave the same
+> way, in the next minor. While the major is zero a breaking change bumps the
+> minor, so `1.0.0` cannot arrive by accident — it will mean the surface has
+> stopped moving, not that the feature list is finished.
 
 ---
 
@@ -82,29 +76,6 @@ no attestation.
 
 ---
 
-## Scope
-
-Everything needed to stand an instance up lives here, and the installer does as much
-of it as it can without being asked twice.
-
-**One thing is deliberately not here: memory.** What an instance should *know* is
-personal and specific to whoever runs it — it does not belong in a repository that
-anyone can clone, and it is conveyed separately.
-
-Everything else — settings shape, host prerequisites, branch protection payload — is
-in the tree.
-
-**The Claude Code CLI has background sessions of its own now** (`claude --bg`), so the
-fair question is whether they replace the middle of this chain. Measured against
-2.1.322: not on a host that mixes elevated and unelevated instances. There is one
-daemon per user and it holds one integrity level, so the elevated instance either stops
-the others from starting at all or is silently de-elevated, depending only on which
-started first. Nothing starts the daemon at logon either.
-[Issue #103](https://github.com/TylerVigario/greenroom-win/issues/103) has both
-directions, measured.
-
----
-
 ## Use
 
 ```powershell
@@ -133,10 +104,6 @@ The other two differ, deliberately: `Update-GreenroomInstance` with no name upda
 **every** instance whose assets are behind, and `Uninstall-` always requires `-Name`,
 because removing the wrong instance is not a mistake worth making convenient.
 
-`Show-` and `Hide-` are approved verbs and they are also literally what happens: the
-window exists the whole time and these call `ShowWindow` on it. "Attach" was always a
-euphemism for a visibility toggle.
-
 **`Get-GreenroomInstance` emits objects**, so the listing feeds the actions:
 
 ```powershell
@@ -151,17 +118,13 @@ ends at them. `Restart-` and `Start-` return the instance they brought up, and s
 install result instead. `Uninstall-` and `Stop-` return result objects. When you want
 state after a visibility change, ask for it: `Show-GreenroomSession x; Get-GreenroomInstance x`.
 
-`Stop-` is the one that had no answer before: `Hide-` only moves the window and the
-process keeps its handles, `Restart-` brings it straight back, and `Uninstall-` removes
-the instance. It stops the watchdog, the session and the launcher, then watches for a few
-seconds to confirm nothing put the session back — a supervisor that was missed would
-otherwise leave three successful-looking kill counts and a running session. The scheduled
-task is stopped but **not disabled**, so the instance returns at the next logon, or when
-you run `Start-GreenroomSession`. `Start-` is the only one of these that never kills
-anything: an instance that is already running is returned as it is.
-
-The case it exists for is upgrading the Claude Code CLI, which every session holds open —
-see [Troubleshooting](docs/troubleshooting.md#upgrading-the-claude-code-cli).
+`Stop-` takes the watchdog, the session and the launcher down together, then watches
+for a few seconds to confirm nothing put the session back — a supervisor that was
+missed would otherwise leave three successful-looking kill counts and a running
+session. The task is stopped but **not disabled**, so the instance returns at the next
+logon or on `Start-GreenroomSession`. The case it exists for is upgrading the Claude
+Code CLI, which every session holds open — see
+[Troubleshooting](docs/troubleshooting.md#upgrading-the-claude-code-cli).
 
 Every state-changing command supports `-WhatIf` and `-Confirm`. `-Verbose` explains
 what a command decided and why, including the specific reason a window could not be
@@ -242,8 +205,16 @@ to itself, so the whole chain relocates with the module and the registered task 
 into wherever it was installed.
 
 The watchdog polls once a second and restarts a dead session. Crash-loop guard:
-more than 5 restarts in 5 minutes triggers a 2-minute backoff. Measured recovery
-after a kill on the reference host was ~1.4 s.
+more than 5 restarts in 5 minutes triggers a 2-minute backoff. Measured on the
+reference host, three kills: recovery to a new session in 1.1 s, 1.2 s and 1.8 s.
+
+**`claude --bg` does not replace any of this.** The CLI grew background sessions of
+its own, so the question is fair, and the answer is measured against 2.1.322: there
+is one daemon per user and it holds one integrity level, so on a host mixing elevated
+and unelevated instances the elevated one either stops the others from starting or is
+silently de-elevated, depending only on which started first. Nothing starts the daemon
+at logon either. [Issue #103](https://github.com/TylerVigario/greenroom-win/issues/103)
+has both directions.
 
 ---
 
