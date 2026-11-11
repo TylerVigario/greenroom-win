@@ -89,11 +89,41 @@ process. That was requested as [microsoft/terminal#5694][t5694] and closed
 knows which window is which, because it is the one that made it:
 it snapshots every `CASCADIA_HOSTING` handle immediately before launching
 `wt.exe`, then takes the handle that is both *new since that snapshot* and
-*owned by the `WindowsTerminal.exe` in the session's own ancestry*. Two
-independent filters, so a window opened by an unrelated `wt` at the same moment
-fails one of them. Exactly one survivor is written to
-`~/.claude/greenroom/<instance>/session.json`; any other count records nothing
-and says so in the log rather than guessing.
+*owned by the `WindowsTerminal.exe` in the session's own ancestry*, so a window
+opened by an unrelated `wt` at the same moment fails one of them. The survivor is
+written to `~/.claude/greenroom/<instance>/session.json`; anything ambiguous
+records nothing and says so in the log rather than guessing.
+
+**Those two filters are not enough when two instances start in the same second.**
+Both windows are new, and both belong to the same `WindowsTerminal.exe`, so
+neither filter separates them and capture fails for *both* instances — they run
+perfectly and neither can ever be revealed. So `wt` is launched with
+`--title <unique token>` and the watchdog polls for the window carrying it, which
+decides the question outright instead of narrowing it.
+
+**The token is readable for only a moment, and that is deliberate.**
+`--suppressApplicationTitle` is **not** passed, so the session takes the title
+back: the window ends up reading `✳ <instance>`, which is what a human wants in
+the taskbar and what `Test-SessionTitle` matches when a corpse has to be closed.
+MEASURED on Windows 11 26200 with Claude Code 2.1.322, polling every 50 ms:
+
+| ~t | Window title |
+|---|---|
+| 0.03 s | `Windows Terminal` |
+| 0.12 s | `Terminal` |
+| 0.32 s | `greenroom-<instance>-<8 hex>` — the token |
+| 0.67 s | `claude` |
+| 0.99 s | `✳ <instance>` |
+
+A third of a second. That is why the search runs from the launch rather than from
+the moment the session's pid appears, which is a second or more later.
+
+**This is not the title matching rejected below.** The token is read once, inside
+the first second, to choose between handles that have *just appeared* — a string
+greenroom itself put there, not one Claude Code owns. Resolution never consults a
+title: it uses the recorded handle, validated on every use, with no fallback. A
+Windows Terminal that ignored `--title` would simply leave the two original
+filters in place, and a genuinely ambiguous start still records nothing.
 
 That record is the **only** source. There is deliberately no fallback.
 

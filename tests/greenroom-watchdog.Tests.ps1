@@ -8,6 +8,11 @@
   recorded for it. By name or title alone it adopted, and closed the window of, a Remote
   Control session started by hand.
 
+  And which window it records as that session's, which is the part that two instances
+  starting in the same second used to defeat: both windows are new, and both belong to
+  the one WindowsTerminal process, so neither filter could separate them. The launch
+  now carries a unique --title token and the token decides.
+
   The watchdog is a script with a supervision loop, not a module function, so the tests
   lift its functions out of the script's syntax tree and run that exact code against a
   faked process table and faked windows. Nothing is started, stopped or closed: the
@@ -21,7 +26,8 @@ BeforeAll {
 
     $ast = [System.Management.Automation.Language.Parser]::ParseFile(
         (Join-Path $assets 'greenroom-watchdog.ps1'), [ref]$null, [ref]$null)
-    foreach ($name in 'Get-RcClaudePid', 'Close-StaleWindows', 'Get-WindowInfo', 'Send-WindowClose') {
+    foreach ($name in 'Get-RcClaudePid', 'Close-StaleWindows', 'Get-WindowInfo', 'Send-WindowClose',
+                      'Get-CascadiaHandleSet', 'Find-TokenWindow', 'Save-SessionWindow') {
         $fn = $ast.Find({ param($n)
                 $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name
             }, $true)
@@ -159,5 +165,135 @@ Describe 'the watchdog closes only the window greenroom recorded' {
         Close-StaleWindows
         Should -Invoke Send-WindowClose -Times 0
         $script:Logged | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'the watchdog records the window it just created' {
+
+    BeforeAll {
+        function Log($m) { $script:Logged += @($m) }
+
+        # One place that knows what the desktop looks like. Keyed by handle, so
+        # Get-CascadiaHandleSet and Get-WindowInfo cannot disagree with each other.
+        function UseDesktop([hashtable]$Windows) {
+            $script:Desktop = $Windows
+            Mock Get-CascadiaHandleSet { return , @($script:Desktop.Keys | ForEach-Object { [int64]$_ }) }
+            Mock Get-WindowInfo {
+                $w = $script:Desktop[[int][int64]$Handle]
+                if ($w) { return $w }
+                [PSCustomObject]@{ OwnerPid = 0; Class = ''; Title = '' }
+            }
+        }
+        function Win([int]$Owner, [string]$Title) {
+            [PSCustomObject]@{ OwnerPid = $Owner; Class = 'CASCADIA_HOSTING_WINDOW_CLASS'; Title = $Title }
+        }
+        # claude 100 <- pwsh 50 <- WindowsTerminal 777. The walk starts at the claude
+        # pid and stops at the first WindowsTerminal.exe above it.
+        function UseAncestry {
+            UseProcesses @(
+                (Proc 777 1 'WindowsTerminal.exe' 'WindowsTerminal.exe'),
+                (Proc 50 777 'pwsh.exe' 'pwsh.exe'),
+                (Proc 100 50 'claude.exe' 'claude.exe --remote-control laptop-admin --name laptop-admin')
+            )
+        }
+        function RecordedHandle {
+            $f = Join-Path $script:stateDir 'session.json'
+            if (-not (Test-Path $f)) { return $null }
+            [int64](Get-Content $f -Raw | ConvertFrom-Json).handle
+        }
+    }
+
+    BeforeEach {
+        $script:Instance = 'laptop-admin'
+        $script:stateDir = (New-Item -ItemType Directory -Path (Join-Path $TestDrive ([guid]::NewGuid()))).FullName
+        $script:Logged = @()
+        Mock Start-Sleep { }
+        UseAncestry
+    }
+
+    Context 'Find-TokenWindow' {
+
+        It 'returns the window carrying the token' {
+            UseDesktop @{ 10 = (Win 777 'Terminal'); 11 = (Win 777 'greenroom-laptop-admin-ab12cd34') }
+            Find-TokenWindow -Token 'greenroom-laptop-admin-ab12cd34' -Before @(10) | Should -Be 11
+        }
+
+        It 'matches through the Administrator prefix an elevated instance gets' {
+            UseDesktop @{ 11 = (Win 777 'Administrator: greenroom-laptop-admin-ab12cd34') }
+            Find-TokenWindow -Token 'greenroom-laptop-admin-ab12cd34' | Should -Be 11
+        }
+
+        It 'ignores a window that was already there before the launch' {
+            UseDesktop @{ 10 = (Win 777 'greenroom-laptop-admin-ab12cd34') }
+            Find-TokenWindow -Token 'greenroom-laptop-admin-ab12cd34' -Before @(10) -Attempts 2 | Should -Be 0
+        }
+
+        It 'gives up rather than hanging when the token never appears' {
+            UseDesktop @{ 11 = (Win 777 'Terminal') }
+            Find-TokenWindow -Token 'greenroom-laptop-admin-ab12cd34' -Attempts 3 | Should -Be 0
+            Should -Invoke Get-CascadiaHandleSet -Times 3 -Exactly
+        }
+
+        It 'stops looking the moment it matches' {
+            UseDesktop @{ 11 = (Win 777 'greenroom-laptop-admin-ab12cd34') }
+            Find-TokenWindow -Token 'greenroom-laptop-admin-ab12cd34' -Attempts 50 | Should -Be 11
+            Should -Invoke Get-CascadiaHandleSet -Times 1 -Exactly
+        }
+    }
+
+    Context 'Save-SessionWindow' {
+
+        It 'records the token window when two instances started in the same second' {
+            # Both windows are new and both belong to WindowsTerminal 777 -- the exact
+            # case the two original filters cannot separate.
+            UseDesktop @{ 10 = (Win 777 'Terminal')
+                          11 = (Win 777 '* laptop-admin')
+                          12 = (Win 777 '* render-') }
+            Save-SessionWindow -ClaudePid 100 -Before @(10) -TokenHandle 11
+            RecordedHandle | Should -Be 11
+            $script:Logged | Should -Match 'by title token'
+        }
+
+        It 'records the only candidate when no token was found' {
+            UseDesktop @{ 10 = (Win 777 'Terminal'); 11 = (Win 777 '* laptop-admin') }
+            Save-SessionWindow -ClaudePid 100 -Before @(10) -TokenHandle 0
+            RecordedHandle | Should -Be 11
+        }
+
+        It 'records nothing when <Why>' -ForEach @(
+            @{ Why = 'two candidates appeared and no token was found'
+               Desktop = @{ 10 = 'Terminal'; 11 = '* laptop-admin'; 12 = '* render-' }
+               Before = @(10); Token = 0 }
+            @{ Why = 'no new window appeared at all'
+               Desktop = @{ 10 = 'Terminal' }
+               Before = @(10); Token = 0 }
+        ) {
+            $d = @{}
+            foreach ($k in $Desktop.Keys) { $d[$k] = (Win 777 $Desktop[$k]) }
+            UseDesktop $d
+            Save-SessionWindow -ClaudePid 100 -Before $Before -TokenHandle $Token
+            RecordedHandle | Should -BeNullOrEmpty
+            $script:Logged | Should -Match 'recording nothing'
+        }
+
+        It 'records nothing when the token window belongs to another WindowsTerminal' {
+            # A second terminal the operator opened by hand, which happened to be
+            # titled with our token -- it is not this session's window.
+            UseDesktop @{ 10 = (Win 777 'Terminal'); 11 = (Win 888 'greenroom-laptop-admin-ab12cd34') }
+            Save-SessionWindow -ClaudePid 100 -Before @(10) -TokenHandle 11
+            RecordedHandle | Should -BeNullOrEmpty
+            $script:Logged | Should -Match 'is not a new window of WindowsTerminal pid 777'
+        }
+
+        It 'records nothing when there is no WindowsTerminal in the ancestry' {
+            UseProcesses @(
+                (Proc 50 1 'pwsh.exe' 'pwsh.exe'),
+                (Proc 100 50 'claude.exe' 'claude.exe --remote-control laptop-admin')
+            )
+            UseDesktop @{ 11 = (Win 777 '* laptop-admin') }
+            Save-SessionWindow -ClaudePid 100 -Before @() -TokenHandle 11
+            RecordedHandle | Should -BeNullOrEmpty
+            $script:Logged | Should -Match 'no WindowsTerminal in ancestry'
+        }
     }
 }

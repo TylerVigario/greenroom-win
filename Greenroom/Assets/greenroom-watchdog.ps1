@@ -167,14 +167,24 @@ function Get-CascadiaHandleSet {
 # dialog or a login prompt never applies --name at all, so title matching fails
 # exactly when attaching matters most.
 #
-# The handle is knowable at creation instead. Two independent filters are applied
-# so a concurrent start cannot be misattributed:
-#   1. the handle must be NEW since immediately before wt.exe was launched
-#   2. it must belong to the WindowsTerminal process in this session's ancestry
-# Exactly one handle satisfying both is recorded; anything else records nothing and
-# leaves the title fallback in place rather than storing a guess.
+# The handle is knowable at creation instead. Three filters:
+#   1. the title token wt was launched with, found by Find-TokenWindow in the moment
+#      before the session takes the title back. This one DECIDES -- it names our
+#      window, rather than narrowing a field of candidates.
+#   2. the handle must be NEW since immediately before wt.exe was launched
+#   3. it must belong to the WindowsTerminal process in this session's ancestry
+#
+# With a token, 2 and 3 become a cross-check: a token window that is not a new window
+# of this session's own terminal is an anomaly, and nothing is recorded. Without one
+# -- a Windows Terminal that ignores --title, or a window that appeared too slowly to
+# catch -- exactly one handle satisfying 2 and 3 is recorded. Two instances starting
+# in the same second produce two handles that satisfy both, which is the case the
+# token exists for.
+#
+# Anything ambiguous records nothing and says so, rather than storing a guess. There
+# is no title fallback at resolve time; the recorded handle is the only source.
 function Save-SessionWindow {
-    param([int]$ClaudePid, [int64[]]$Before)
+    param([int]$ClaudePid, [int64[]]$Before, [int64]$TokenHandle = 0)
 
     $wtPid = $null
     $cur = Get-CimInstance Win32_Process -Filter "ProcessId=$ClaudePid" -ErrorAction SilentlyContinue
@@ -184,31 +194,42 @@ function Save-SessionWindow {
         if ($par.Name -eq 'WindowsTerminal.exe') { $wtPid = [int]$par.ProcessId; break }
         $cur = $par
     }
-    if (-not $wtPid) { Log 'window capture: no WindowsTerminal in ancestry -- leaving title fallback'; return }
+    if (-not $wtPid) { Log 'window capture: no WindowsTerminal in ancestry -- recording nothing'; return }
 
     $now = Get-CascadiaHandleSet
     $new = @($now | Where-Object { $Before -notcontains $_ })
 
-    $owned = @($new | Where-Object {
-        $wp = 0
-        [GreenroomWd.Win1]::GetWindowThreadProcessId([IntPtr]$_, [ref]$wp) | Out-Null
-        [int]$wp -eq $wtPid
-    })
+    # Through Get-WindowInfo rather than a P/Invoke inline here, so there is one
+    # primitive that reads a window and the selection can be exercised by a test
+    # against faked windows instead of real ones.
+    $owned = @($new | Where-Object { (Get-WindowInfo -Handle ([IntPtr]$_)).OwnerPid -eq $wtPid })
 
-    if ($owned.Count -ne 1) {
-        Log "window capture: $($owned.Count) candidate windows (new=$($new.Count), wt pid $wtPid) -- leaving title fallback"
+    $how = ''
+    if ($TokenHandle) {
+        if ($owned -notcontains $TokenHandle) {
+            Log "window capture: title-token window $TokenHandle is not a new window of WindowsTerminal pid $wtPid -- recording nothing"
+            return
+        }
+        $handle = $TokenHandle
+        $how = ', by title token'
+    }
+    elseif ($owned.Count -eq 1) {
+        $handle = $owned[0]
+    }
+    else {
+        Log "window capture: $($owned.Count) candidate windows (new=$($new.Count), wt pid $wtPid) and no title token -- recording nothing"
         return
     }
 
     $state = @{
-        handle       = $owned[0]
+        handle       = $handle
         claudePid    = $ClaudePid
         terminalPid  = $wtPid
         capturedUtc  = (Get-Date).ToUniversalTime().ToString('o')
     }
     $path = Join-Path $stateDir 'session.json'
     $state | ConvertTo-Json | Set-Content -Path $path -Encoding UTF8
-    Log "window capture: handle $($owned[0]) on WindowsTerminal pid $wtPid"
+    Log "window capture: handle $handle on WindowsTerminal pid $wtPid$how"
 }
 
 . (Join-Path $PSScriptRoot 'Format-ProcessArgument.ps1')
@@ -227,6 +248,41 @@ function Get-WindowInfo {
     $tb = New-Object System.Text.StringBuilder 512
     [GreenroomWd.Win1]::GetWindowText($Handle, $tb, 512) | Out-Null
     [PSCustomObject]@{ OwnerPid = [int]$wp; Class = $cls.ToString(); Title = $tb.ToString() }
+}
+
+# The handle of the window wt was told to title with this token, or 0.
+#
+# Polls, and returns the instant it matches, because the token is readable for only a
+# few hundred milliseconds -- Windows Terminal applies it at about 0.3 s and the
+# session takes the title back at about 1 s. Reading once would mostly miss it.
+#
+# A SUBSTRING match, not equality: an elevated instance's window reads
+# "Administrator: <token>". That is safe only because the token is unique by
+# construction; it is not a title match in the sense gotchas.md rejects.
+#
+# Counted attempts rather than a wall-clock deadline, for the reason
+# Stop-GreenroomSession records: a deadline loop with the sleep inside it becomes a
+# busy-wait the moment the sleep is mocked, which is exactly what happens under test.
+#
+# Only windows new since the pre-launch snapshot are considered, so a token that
+# somehow matched an existing window's title cannot be returned.
+function Find-TokenWindow {
+    [CmdletBinding()]
+    [OutputType([int64])]
+    param(
+        [Parameter(Mandatory)][string]$Token,
+        [int64[]]$Before = @(),
+        [int]$Attempts = 320
+    )
+
+    for ($i = 0; $i -lt $Attempts; $i++) {
+        foreach ($h in (Get-CascadiaHandleSet)) {
+            if ($Before -contains $h) { continue }
+            if ((Get-WindowInfo -Handle ([IntPtr]$h)).Title -like "*$Token*") { return $h }
+        }
+        Start-Sleep -Milliseconds 25
+    }
+    return 0
 }
 
 # WM_CLOSE. PostMessage, not SendMessage: PostMessage returns immediately, so an
@@ -276,13 +332,33 @@ function Start-RcSession {
     # down could appear as "new" in the comparison.
     $script:windowsBefore = Get-CascadiaHandleSet
     # -w new forces its own window instead of a tab in an existing terminal.
+    #
+    # --title stamps a unique token on that window at creation, which is what makes
+    # capture decidable when two instances start in the same second.
+    # --suppressApplicationTitle is deliberately NOT passed: the session is meant to
+    # take the title back, so the window ends up reading "<glyph> <instance>" for a
+    # human and for Test-SessionTitle when a corpse has to be closed. MEASURED on
+    # Windows 11 26200 with Claude Code 2.1.322, polling at 50 ms -- "Windows
+    # Terminal" at 0.03 s, "Terminal" at 0.12 s, the token at 0.32 s, "claude" at
+    # 0.67 s, "<glyph> <instance>" at 0.99 s. Hence the search below runs from here
+    # and not from where the session's pid finally appears, seconds later.
+    #
     # Quoted, because Start-Process quotes nothing: a shell or launcher path with a space
     # in it -- a profile name, a OneDrive Documents folder -- otherwise arrives in pieces
     # and the session never starts. See Format-ProcessArgument.ps1 next door.
-    $args_ = @('-w', 'new', $shell, '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+    $script:captureToken = "greenroom-$Instance-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+    $script:tokenHandle  = 0
+    $args_ = @('-w', 'new', '--title', $script:captureToken,
+               $shell, '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass',
                '-File', $inner, '-Instance', $Instance) | Format-ProcessArgument
     Start-Process -FilePath $wt -ArgumentList $args_ -WindowStyle Hidden
     Log 'launched WT session (hidden)'
+
+    # Best-effort, like the capture it feeds: a miss costs the deterministic path,
+    # not the session.
+    $script:tokenHandle = Find-TokenWindow -Token $script:captureToken -Before $script:windowsBefore
+    if ($script:tokenHandle) { Log "window capture: title token on handle $script:tokenHandle" }
+    else { Log 'window capture: title token never appeared -- falling back to the new-window difference' }
 }
 
 $sessionPid   = $null
@@ -323,7 +399,7 @@ while ($true) {
                         # Capture now, while it is unambiguous which window was
                         # just created. Best-effort: a failure here costs the
                         # deterministic path, not the session.
-                        try { Save-SessionWindow -ClaudePid $found -Before $script:windowsBefore }
+                        try { Save-SessionWindow -ClaudePid $found -Before $script:windowsBefore -TokenHandle $script:tokenHandle }
                         catch { Log "window capture failed: $_" }
                         break
                     }
