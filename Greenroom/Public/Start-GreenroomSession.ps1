@@ -52,11 +52,16 @@
 .EXAMPLE
   $running = (Get-GreenroomInstance).Instance
   $running | Stop-GreenroomSession
-  winget upgrade --id Anthropic.ClaudeCode
+  # ...whatever actually needs every session down...
   $running | Start-GreenroomSession
-  Upgrading the CLI every session holds open. The names are captured FIRST: after the
-  stop Get-GreenroomInstance lists nothing, and this also brings back exactly what was
-  running rather than an instance that was deliberately down.
+  Bringing back exactly what was up after taking everything down. The names are captured
+  FIRST: after the stop Get-GreenroomInstance lists nothing, and capturing also avoids
+  starting an instance that was deliberately down.
+
+  The middle line is a placeholder because the right command depends on the install.
+  `winget upgrade --id Anthropic.ClaudeCode` belongs there on a WinGet install; on a
+  native install nothing does, because that updater renames the running binary aside
+  instead of removing it. See Stop-GreenroomSession's DESCRIPTION for the measurements.
 #>
 function Start-GreenroomSession {
     [CmdletBinding(SupportsShouldProcess)]

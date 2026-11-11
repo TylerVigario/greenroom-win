@@ -83,31 +83,76 @@ the duplicate from doing damage, but the tidy route is `Restart-GreenroomSession
 
 ## Upgrading the Claude Code CLI
 
-A running session holds `claude.exe` open, so upgrading the CLI underneath it fails:
+**Whether you need downtime depends on how the CLI was installed.**
+
+### The Windows rule everything here follows from
+
+Measured against a probe process holding its own image:
+
+| Operation on a running executable | Result |
+|---|---|
+| overwrite in place, open for write, truncate | **fails** — "being used by another process" |
+| delete | **fails** — "Access to the path … is denied" |
+| **rename** | **succeeds** |
+| create a new file at the freed path | **succeeds** |
+| delete the renamed original, still running | fails; succeeds once it exits |
+
+A running executable cannot be overwritten or deleted, but it *can* be renamed out of
+the way. One rule — and the two installers pick different sides of it.
+
+### WinGet removes, so it needs the sessions down
+
+Every session runs through one
+`~\AppData\Local\Microsoft\WinGet\Links\claude.exe` symlink into a single package file,
+so upgrading underneath a running session hits the delete row:
 
 ```
 remove: Access is denied.: "…\WinGet\Packages\Anthropic.ClaudeCode_…\claude.exe"
 Installer failed with exit code: 0x8a150003
 ```
 
-On a WinGet install there is only **one** file to lock. `~\AppData\Local\Microsoft\WinGet\Links\claude.exe`
-is a symlink into the package directory, and every session — greenroom's and any you
-started yourself — runs through it. Hiding a window does not release the handle, and
-restarting only re-takes it.
+Hiding a window does not release the handle, and restarting only re-takes it. **On a
+WinGet install, take the instances down** — the procedure below. The package is still
+published; `winget show --id Anthropic.ClaudeCode` resolves.
 
-Take the instances down, upgrade, bring them back:
+### The native updater renames, so it needs nothing
+
+Measured 2026-11-09 with five sessions up: `~\.local\bin\claude.exe` was **renamed** to
+`claude.exe.old.1794251994594.15092` at 11:19:54 — an epoch-millisecond stamp plus the
+pid of a session holding it — and the new 346,487,456-byte build was written at the
+freed path. `~\.claude\.last-update-result.json` recorded
+`{"outcome":"success","path":"native"}`.
+
+Three consequences worth knowing:
+
+- **Sessions that predate the rename keep executing the renamed bytes.** They are
+  unaffected and need no restart to stay working.
+- **`claude --version` starts a new process from the path, so it reports what is on
+  disk** — not what any running session is executing. There is no supported way to ask
+  a running session which build it is on, and `MainModule.FileName` does not answer it
+  either: it reported the original path for every session here, including the four that
+  predate the rename.
+- **The renamed original is left behind** — 329 MB — because it cannot be deleted while
+  a session maps it. Only one such file existed here, from the update that landed while
+  sessions were running; earlier updates left none, consistent with the old file being
+  deletable when nothing maps it. Whether anything sweeps a stale `.old.*` later is
+  **not established**. On a host with always-on sessions, budget for it.
+
+### Taking every instance down, when something needs it
+
+The pattern is worth knowing, because the mistake in it is easy to make:
 
 ```powershell
 $running = (Get-GreenroomInstance).Instance
 $running | Stop-GreenroomSession
-winget upgrade --id Anthropic.ClaudeCode
+# ...whatever actually needs every session down...
 $running | Start-GreenroomSession
 ```
 
 **Capture the names first.** `Get-GreenroomInstance` lists *running* sessions, so once
-they are stopped it returns nothing. MEASURED: piping a fresh `Get-GreenroomInstance`
-into the restart therefore brings nothing back up. Capturing also restores exactly what
-was running, and not an instance that was down on purpose.
+they are stopped it returns nothing -- so piping a fresh `Get-GreenroomInstance` into the
+restart brings nothing back. Capturing also restores exactly what was running, and not an
+instance that was down on purpose.
 `Stop-GreenroomSession *` and `Start-GreenroomSession *` are the blunter alternative: every
 registered instance, including one that was down on purpose before you started.
 
