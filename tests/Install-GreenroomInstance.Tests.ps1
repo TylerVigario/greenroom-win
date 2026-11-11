@@ -328,6 +328,107 @@ Describe 'Install-GreenroomInstance, elevated' {
     }
 }
 
+<#
+  THE RUNNING SESSION IS NOT THE TASK. Re-registering changes what the NEXT start gets;
+  the process already running keeps the token it has. Revoking used to print nothing at
+  all, so a revoke and an ordinary re-run looked identical while a full admin token
+  carried on -- the wrong direction for a security setting to fail in.
+#>
+Describe 'Install-GreenroomInstance, elevation that has not been restarted into' {
+
+    BeforeEach {
+        InstallTripwires
+        Mock -ModuleName Greenroom Test-SelfElevated { $true }
+        Mock -ModuleName Greenroom Resolve-GreenroomPrerequisite {
+            [PSCustomObject]@{ WindowsTerminal = 'C:\wt.exe'; Shell = 'C:\pwsh.exe'; WScript = 'C:\wscript.exe'
+                               ClaudeExe = 'C:\claude.exe'; ClaudeVersion = '2.1.300 (Claude Code)' }
+        }
+        foreach ($c in 'Set-ProjectTrust', 'Set-ProjectGrant', 'Register-GreenroomTask', 'Test-TrustSurvived') {
+            Mock -ModuleName Greenroom $c { }
+        }
+        Mock -ModuleName Greenroom Get-SessionProcess { @([PSCustomObject]@{ Instance = 'probe'; Pid = 4242; Opaque = $false }) }
+    }
+
+    # In BeforeAll, not the Describe body: a function defined in the body is created
+    # during DISCOVERY and is gone by the time a test runs.
+    BeforeAll {
+        # $Token is what the RUNNING session's token measures as: $true admin,
+        # $false limited, $null this shell cannot see.
+        function Warnings([hashtable]$Params, $Token, [bool]$PrevElevated) {
+            Mock -ModuleName Greenroom Test-SessionElevated ([scriptblock]::Create("`$$(if ($null -eq $Token) { 'null' } else { $Token })"))
+            WritePrevConfig @{ workingDirectory = $script:WorkDir; elevated = $PrevElevated }
+            $w = @()
+            $null = Install-GreenroomInstance -Name probe -NoStart -Confirm:$false @Params -WarningVariable w -WarningAction SilentlyContinue
+            , @($w | ForEach-Object { "$_" })
+        }
+    }
+
+    It 'warns that a revoked session keeps its admin token until it restarts' {
+        $w = Warnings @{ Elevated = $false } -Token $true -PrevElevated $true
+        $stale = @($w | Where-Object { $_ -match 'RUNNING session' })
+        $stale.Count | Should -Be 1
+        $stale[0] | Should -Match 'RunLevel Limited'
+        $stale[0] | Should -Match 'FULL ADMIN token'
+        $stale[0] | Should -Match ([regex]::Escape('Restart-GreenroomSession probe'))
+    }
+
+    It 'confirms the revoke itself, rather than saying nothing' {
+        $w = Warnings @{ Elevated = $false } -Token $true -PrevElevated $true
+        @($w | Where-Object { $_ -match 'elevation REVOKED' }).Count | Should -Be 1
+    }
+
+    It 'warns the other way: granted, but the running session is still limited' {
+        $w = Warnings @{ Elevated = $true } -Token $false -PrevElevated $false
+        $stale = @($w | Where-Object { $_ -match 'RUNNING session' })
+        $stale.Count | Should -Be 1
+        $stale[0] | Should -Match 'RunLevel Highest'
+        $stale[0] | Should -Match 'limited token'
+    }
+
+    It 'says nothing about a mismatch when <Why>' -ForEach @(
+        @{ Why = 'the running session already agrees'; Elevated = $true;  Token = $true;  Prev = $true }
+        @{ Why = 'this shell cannot read the token';   Elevated = $false; Token = $null;  Prev = $true }
+    ) {
+        $w = Warnings @{ Elevated = $Elevated } -Token $Token -PrevElevated $Prev
+        @($w | Where-Object { $_ -match 'RUNNING session' }).Count | Should -Be 0
+    }
+
+    It 'says nothing about a mismatch when no session is running' {
+        Mock -ModuleName Greenroom Get-SessionProcess { @() }
+        Mock -ModuleName Greenroom Test-SessionElevated { throw 'must not be asked about a session that is not running' }
+        WritePrevConfig @{ workingDirectory = $script:WorkDir; elevated = $true }
+        $w = @()
+        $null = Install-GreenroomInstance -Name probe -Elevated:$false -NoStart -Confirm:$false -WarningVariable w -WarningAction SilentlyContinue
+        @($w | Where-Object { "$_" -match 'RUNNING session' }).Count | Should -Be 0
+        @($w | Where-Object { "$_" -match 'elevation REVOKED' }).Count | Should -Be 1
+    }
+}
+
+Describe 'Resolve-InstanceElevated' {
+
+    # Get-GreenroomInstance's Elevated column, and the installer's own advice about it.
+    # The configured value describes the NEXT start; the token describes the session the
+    # operator is looking at.
+    It 'prefers the measured token over the configured value' {
+        WritePrevConfig @{ workingDirectory = $script:WorkDir; elevated = $false }
+        Mock -ModuleName Greenroom Get-GreenroomStateRoot { $script:StateRoot }
+        Mock -ModuleName Greenroom Test-SessionElevated { $true }
+        InModuleScope Greenroom { Resolve-InstanceElevated -Name 'probe' -ClaudePid 4242 } | Should -BeTrue
+    }
+
+    It 'falls back to the configured value when <Why>' -ForEach @(
+        @{ Why = 'the token cannot be read'; ClaudePid = 4242; Measured = $null }
+        @{ Why = 'nothing is running';       ClaudePid = 0;    Measured = $false }
+    ) {
+        WritePrevConfig @{ workingDirectory = $script:WorkDir; elevated = $true }
+        Mock -ModuleName Greenroom Get-GreenroomStateRoot { $script:StateRoot }
+        Mock -ModuleName Greenroom Test-SessionElevated ([scriptblock]::Create("`$$(if ($null -eq $Measured) { 'null' } else { $Measured })"))
+        InModuleScope Greenroom -Parameters @{ p = $ClaudePid } {
+            param($p) Resolve-InstanceElevated -Name 'probe' -ClaudePid $p
+        } | Should -BeTrue
+    }
+}
+
 Describe 'Model' {
 
     BeforeEach {

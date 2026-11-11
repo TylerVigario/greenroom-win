@@ -25,6 +25,25 @@ function Test-InstanceElevated {
     return [bool]($c -and $c.elevated)
 }
 
+<#
+  Whether an instance's RUNNING session has a full admin token, preferring what it
+  actually has over what was configured for it.
+
+  The two disagree after an elevation change nothing has restarted into, and the
+  configured value is the misleading one -- it describes the NEXT start. Reported as the
+  measurement when the measurement is possible, and as the configuration when it is not,
+  which is also the only answer available for an instance that is not running.
+#>
+function Resolve-InstanceElevated {
+    param([Parameter(Mandatory)][string]$Name, [int]$ClaudePid)
+
+    if ($ClaudePid) {
+        $measured = Test-SessionElevated -ProcessId $ClaudePid
+        if ($null -ne $measured) { return $measured }
+    }
+    return (Test-InstanceElevated -Name $Name)
+}
+
 # Whether THIS session is elevated. Determines what discovery can see, not what the
 # instances are.
 function Test-SelfElevated {

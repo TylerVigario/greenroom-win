@@ -301,7 +301,9 @@ posture:
   with no name. Run it elevated and the blind spot is gone; it belongs to the shell, not
   the session.
 - **Nothing on screen distinguishes an elevated session** — no prompt, no badge.
-  `Get-GreenroomInstance` is how you tell.
+  `Get-GreenroomInstance` is how you tell, and its `Elevated` column reports the token
+  the **session** actually holds, measured, rather than the task's `RunLevel`. Those two
+  are not the same thing between a change and the restart that carries it.
 - **Credential Manager is empty until the boot's first elevation.** The `Highest` task
   builds its token via a password-less S4U logon, so the elevated session has no Windows
   Credential Manager credential set until a genuine UAC elevation warms it — a
@@ -317,6 +319,29 @@ each time. Revoke it explicitly:
 ```powershell
 Install-GreenroomInstance -Name desktop-admin -Elevated:$false
 ```
+
+### A change does not reach the session already running
+
+**Either direction takes effect at the next restart, not at the next install.** The task is
+re-registered immediately; the process running under the old one keeps the token it
+started with. MEASURED: after `-Elevated:$false` the task read `RunLevel Limited`, the
+session was the same pid, and its token was still `S-1-16-12288`.
+
+That matters most on a revoke, because there is nothing to see. No UAC prompt marks the
+change, and a revoke otherwise looks exactly like any other re-run. So the installer says
+both things:
+
+```
+WARNING: 'probe': elevation REVOKED -- the task is now RunLevel Limited.
+WARNING: 'probe': the task is now RunLevel Limited, but the RUNNING session still has a
+         FULL ADMIN token and keeps it until it restarts. Get-GreenroomInstance reports
+         what the session actually has, not what the task says.
+         Restart-GreenroomSession probe
+```
+
+The second line appears in either direction, and only when the session's token is
+genuinely readable from the shell doing the install — an unreadable one is reported as
+nothing rather than as agreement.
 
 Background: [gotchas.md §5](gotchas.md).
 
