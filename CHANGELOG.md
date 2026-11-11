@@ -10,6 +10,23 @@ verbatim. 0.1.0 at the bottom is hand-written and reads "Initial release." becau
 release has no changes to list — there is nothing it changed from.
 
 - - -
+## [v0.7.3](https://github.com/TylerVigario/greenroom-win/compare/v0.7.2..v0.7.3) - 2026-11-11
+#### Bug Fixes
+- (**elevation**) say when a change has not reached the running session (#105) - ([5d2eb4a](https://github.com/TylerVigario/greenroom-win/commit/5d2eb4af2dc2260b712a705ad7bf522c994d56f5)) - Tyler Vigario, Claude Opus 5
+- (**watchdog**) decide window capture with a title token (#102) - ([4d3a87f](https://github.com/TylerVigario/greenroom-win/commit/4d3a87f2e7605470f7c6d22f5746ae5024b66911)) - Tyler Vigario, Claude Opus 5
+#### Documentation
+- (**readme**) verify every claim, and cut the rest (#108) - ([7445059](https://github.com/TylerVigario/greenroom-win/commit/7445059006b417b86a52690ad6ba658589e454e7)) - Tyler Vigario, Claude Opus 5
+- (**readme**) badges, and the two flags the chain diagram was hiding (#106) - ([97a1268](https://github.com/TylerVigario/greenroom-win/commit/97a1268093e665fef2eb0180156f2e29f5741466)) - Tyler Vigario, Claude Opus 5
+- (**release**) name the current owner instead of the org the repo left (#100) - ([b15a23b](https://github.com/TylerVigario/greenroom-win/commit/b15a23be2a7dc09d4a839b1387574cf06d4343c5)) - Tyler Vigario, Claude Opus 5
+- (**uninstall**) name the tool that removes the trust entries (#104) - ([77a5c10](https://github.com/TylerVigario/greenroom-win/commit/77a5c106c6664eaf1b75b58fb362d2162cb462ca)) - Tyler Vigario, Claude Opus 5
+- the self-narration pattern was too narrow (#107) - ([6d80c80](https://github.com/TylerVigario/greenroom-win/commit/6d80c80f1eb6b939de3a993d4b658a9713ca7d0d)) - Tyler Vigario, Claude Opus 5
+- no file narrates its own former wording (#101) - ([b3e0b86](https://github.com/TylerVigario/greenroom-win/commit/b3e0b86ea5d83a82dd898c26b489d4a70f9b7098)) - Tyler Vigario, Claude Opus 5
+- a CLI upgrade needs downtime on WinGet, not on native (#99) - ([c12ce86](https://github.com/TylerVigario/greenroom-win/commit/c12ce867b57253d62de49ff3995833cda2d846ce)) - Tyler Vigario, Claude Opus 5
+#### Continuous Integration
+- bump actions/create-github-app-token from 3.2.0 to 3.3.0 in the actions group (#97) - ([0ab88e4](https://github.com/TylerVigario/greenroom-win/commit/0ab88e47b979c3505fa76396a8e2f413a3361475)) - dependabot[bot], dependabot[bot]
+
+- - -
+
 ## [v0.7.2](https://github.com/TylerVigario/greenroom-win/compare/v0.7.1..v0.7.2) - 2026-10-01
 #### Bug Fixes
 - (**install**) look for Git Bash where Claude Code does (#96) - ([d38e1bc](https://github.com/TylerVigario/greenroom-win/commit/d38e1bc53553595b3d6e3491d1a3b218593fadd4)) - Tyler Vigario, Claude Opus 5.5
