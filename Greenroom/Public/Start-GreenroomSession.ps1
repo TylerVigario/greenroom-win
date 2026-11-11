@@ -6,18 +6,17 @@
   Start an instance that is stopped. Leave one that is running alone.
 
 .DESCRIPTION
-  The counterpart to Stop-GreenroomSession, and the gap it left. Until this existed the
-  only way to bring a stopped instance back was Restart-GreenroomSession, which is the
-  wrong verb and the wrong behaviour: against an instance that turns out to be RUNNING it
-  kills the watchdog, the session and the launcher first. Start never kills anything. An
-  instance that is already up is returned as it is.
+  The counterpart to Stop-GreenroomSession. Restart-GreenroomSession is the wrong verb
+  and the wrong behaviour for bringing a stopped instance back: against an instance that
+  turns out to be RUNNING it kills the watchdog, the session and the launcher first.
+  Start never kills anything. An instance that is already up is returned as it is.
 
   It also takes the instance NAME, resolved against registered scheduled tasks, rather
   than a running session -- because the thing being started has no running session.
   Get-GreenroomInstance lists only running sessions, so after a stop it returns nothing,
-  and piping it anywhere does nothing. MEASURED: the upgrade procedure documented in 0.4.0,
-  `Get-GreenroomInstance | Restart-GreenroomSession` after stopping everything, brought
-  nothing back up. Capture the names while they are running instead -- see the example.
+  and piping it anywhere does nothing. MEASURED: stopping everything and then running
+  `Get-GreenroomInstance | Restart-GreenroomSession` brings nothing back up. Capture the
+  names while they are running instead -- see the example.
 
   NO ELEVATION IS NEEDED TO START, even for an elevated instance, and this deliberately
   does not escalate. The task launches at its own run level; starting it is not acting on

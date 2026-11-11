@@ -107,12 +107,12 @@ function Stop-GreenroomSession {
     }
 
     process {
-        # ONE INVOCATION, looping, as Start-GreenroomSession does. This replaced a fan-out
-        # that re-invoked the command once per matched instance, and that was wrong in
-        # three ways: -Confirm's "Yes to All" and "No to All" reset for every nested call,
-        # since each had its own ShouldProcess state; a THROW in one nested call -- a
-        # declined UAC prompt -- unwound through the loop and abandoned every instance after
-        # it; and each nested call resolved its name all over again.
+        # ONE INVOCATION, looping, as Start-GreenroomSession does. NOT a fan-out that
+        # re-invokes the command once per matched instance: that shape is wrong in three
+        # ways. -Confirm's "Yes to All" and "No to All" reset for every nested call, since
+        # each has its own ShouldProcess state; a THROW in one nested call -- a declined
+        # UAC prompt -- unwinds through the loop and abandons every instance after it; and
+        # each nested call resolves its name all over again.
         foreach ($n in @(Resolve-InstanceName -Name $Name -Cmdlet $PSCmdlet)) {
             if (Test-SelfIsInstance -Name $n) {
                 Write-Error -Category InvalidOperation -Message (

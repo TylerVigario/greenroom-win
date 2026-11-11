@@ -70,9 +70,9 @@ single-owner repository outright. Do not "fix" this.
 **`bypass_actors` holds one entry: the release App, by its APP ID** — the number,
 not the `Iv23li...` Client ID that goes in the workflow's secret. **Install the App
 on the repository before applying**, or the whole `PUT` fails with a 422:
-*"Invalid bypass actor"*. GitHub will not accept an actor it cannot resolve, which
-is also why the `actor_id: 0` placeholder this file once carried made the payload
-un-appliable rather than merely inert.
+*"Invalid bypass actor"*. GitHub will not accept an actor it cannot resolve, so a
+placeholder `actor_id` — `0`, say — makes the whole payload un-appliable rather than
+merely inert.
 
 **`bypass_mode: always` bypasses every rule in the ruleset, not just the
 pull-request one** — so the App could in principle force-push or delete `main`, not

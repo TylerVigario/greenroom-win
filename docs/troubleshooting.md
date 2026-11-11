@@ -105,9 +105,9 @@ $running | Start-GreenroomSession
 ```
 
 **Capture the names first.** `Get-GreenroomInstance` lists *running* sessions, so once
-they are stopped it returns nothing. The 0.4.0 version of this procedure piped a fresh
-`Get-GreenroomInstance` into the restart, which therefore brought nothing back. Capturing
-also restores exactly what was running, and not an instance that was down on purpose.
+they are stopped it returns nothing. MEASURED: piping a fresh `Get-GreenroomInstance`
+into the restart therefore brings nothing back up. Capturing also restores exactly what
+was running, and not an instance that was down on purpose.
 `Stop-GreenroomSession *` and `Start-GreenroomSession *` are the blunter alternative: every
 registered instance, including one that was down on purpose before you started.
 

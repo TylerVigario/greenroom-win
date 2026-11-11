@@ -3,8 +3,6 @@
 
 <#
   Every CASCADIA_HOSTING window owned by one WindowsTerminal.exe process.
-
-  Renamed from Get-CascadiaWindows for PSUseSingularNouns, as with Get-SessionProcess.
 #>
 function Get-CascadiaWindow {
     # The `$l` below is the lParam of the Win32 EnumWindowsProc signature,

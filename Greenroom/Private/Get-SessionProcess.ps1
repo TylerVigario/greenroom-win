@@ -18,9 +18,6 @@
   "--remote-control" (diagnostics included), and searching a launcher's descendants
   missed the window entirely, because Windows Terminal is parented to the
   console-handoff broker rather than to us.
-
-  Renamed from Get-AllSessions: PSUseSingularNouns is a real rule for a module's
-  functions, and it was one of the exclusions the script shape needed.
 #>
 function Get-SessionProcess {
     [CmdletBinding()]
