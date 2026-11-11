@@ -29,6 +29,10 @@ Describe 'Get-GreenroomInstance' {
         Mock -ModuleName Greenroom Get-TerminalHost { [PSCustomObject]@{ ProcessId = 2001 } }
         Mock -ModuleName Greenroom Resolve-SessionWindow { [IntPtr]::new(4242) }
         Mock -ModuleName Greenroom Test-InstanceElevated { $false }
+        # $null is "this shell cannot read that process's token", which is also what
+        # keeps this hermetic: the real one would open pid 1001 on the host running the
+        # tests, and the answer would depend on what happens to be running there.
+        Mock -ModuleName Greenroom Test-SessionElevated { $null }
         Mock -ModuleName Greenroom Test-SelfElevated { $true }
         # Hermetic: without this the real Get-ScheduledTask runs, and on a host that has a
         # greenroom task by one of the names above the result would depend on the machine.
@@ -41,6 +45,21 @@ Describe 'Get-GreenroomInstance' {
 
     It 'tags output with the Greenroom.Instance type so the format view applies' {
         (Get-GreenroomInstance)[0].PSObject.TypeNames[0] | Should -Be 'Greenroom.Instance'
+    }
+
+    # The task's RunLevel says what the NEXT start gets. Between an elevation change and
+    # the restart that carries it, the two disagree, and the installer points operators
+    # at this column -- so it has to be about the process they can see.
+    It 'reports the token the session actually holds, not what was configured' {
+        Mock -ModuleName Greenroom Test-SessionElevated { $true }
+        Mock -ModuleName Greenroom Test-InstanceElevated { $false }
+        (Get-GreenroomInstance)[0].Elevated | Should -BeTrue
+    }
+
+    It 'falls back to the configured value when the token cannot be read' {
+        Mock -ModuleName Greenroom Test-SessionElevated { $null }
+        Mock -ModuleName Greenroom Test-InstanceElevated { $true }
+        (Get-GreenroomInstance)[0].Elevated | Should -BeTrue
     }
 
     It 'emits data, not formatted text' {

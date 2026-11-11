@@ -43,6 +43,12 @@
   or hidden from an unelevated shell, since UIPI blocks the window calls silently.
   Requires an elevated caller. -Elevated:$false revokes.
 
+  EITHER DIRECTION TAKES EFFECT AT THE NEXT RESTART, not at the next install. The task
+  is re-registered immediately; the session already running keeps the token it started
+  with. MEASURED: after -Elevated:$false the task read RunLevel Limited while the same
+  pid still held S-1-16-12288. When that gap is detected this says so and names
+  Restart-GreenroomSession.
+
 .PARAMETER Model
   The model this instance launches with, passed to the CLI as --model. An alias such as
   `opus` tracks the newest of that family; a pinned id does not. Omitted, it inherits;
@@ -78,7 +84,8 @@
 
 .EXAMPLE
   Install-GreenroomInstance -Name desktop-admin -Elevated:$false
-  Revokes elevation. Takes effect when the instance next restarts.
+  Revokes elevation. The task changes at once; the RUNNING session keeps its admin
+  token until Restart-GreenroomSession, and this says so when that is the case.
 
 .EXAMPLE
   Install-GreenroomInstance -Name laptop-admin -Model opus
@@ -130,6 +137,14 @@ function Install-GreenroomInstance {
                    'Highest fails with Access Denied otherwise, verified on the reference host. ' +
                    'Nothing has been changed.')
         }
+
+        # Both read BEFORE anything is rewritten, because both are facts about the state
+        # this run is replacing. config.json is overwritten below, and the running
+        # session's token cannot be attributed to the old task once the task is gone.
+        $prev        = Get-InstanceConfig -Name $Name
+        $wasElevated = [bool]($prev -and $prev.elevated)
+        $live        = @(Get-SessionProcess | Where-Object { $_.Instance -eq $Name -and -not $_.Opaque })
+        $liveElevated = if ($live.Count -eq 1) { Test-SessionElevated -ProcessId $live[0].Pid } else { $null }
 
         $pre = Resolve-GreenroomPrerequisite -ClaudeExe $s.ClaudeExe
         Test-GreenroomHostSetting
@@ -186,6 +201,26 @@ function Install-GreenroomInstance {
                            'UIPI blocks the window calls from a lower integrity level. Nothing on screen marks ' +
                            "the session as elevated -- Get-GreenroomInstance is how you tell. Revoke with " +
                            "Install-GreenroomInstance -Name $($s.Instance) -Elevated:`$false")
+        }
+
+        # REVOKING USED TO PRINT NOTHING AT ALL, which made it indistinguishable from an
+        # ordinary re-run -- the wrong direction for a security-relevant setting to fail
+        # in. On the Warning stream, like the grant it mirrors, so it is visible without
+        # -Verbose.
+        if ($wasElevated -and -not $s.Elevated) {
+            Write-Warning "'$($s.Instance)': elevation REVOKED -- the task is now RunLevel Limited."
+        }
+
+        # And the gap that makes the line above not the whole truth: a re-registered task
+        # does not touch a process already running under the old one. MEASURED rather than
+        # inferred -- the session's own token is the only thing that settles it, and $null
+        # means this shell cannot see, which is not the same as agreeing.
+        if ($null -ne $liveElevated -and $liveElevated -ne $s.Elevated) {
+            $has  = if ($liveElevated) { 'a FULL ADMIN token' } else { 'a limited token' }
+            $want = if ($s.Elevated) { 'Highest' } else { 'Limited' }
+            Write-Warning ("'$($s.Instance)': the task is now RunLevel $want, but the RUNNING session still has " +
+                           "$has and keeps it until it restarts. Get-GreenroomInstance reports what the session " +
+                           "actually has, not what the task says. Restart-GreenroomSession $($s.Instance)")
         }
 
         if ($NoStart) {

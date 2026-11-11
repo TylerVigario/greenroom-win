@@ -101,7 +101,11 @@ function Get-GreenroomInstance {
             TerminalPid = if ($th) { [int]$th.ProcessId } else { $null }
             Window      = $hnd
             Visible     = $vis
-            Elevated    = if ($s.Opaque) { $null } else { Test-InstanceElevated -Name $s.Instance }
+            # The SESSION's token, not the task's RunLevel. Those differ whenever an
+            # elevation change has not been restarted into, and the task's value is the
+            # one that lies: it says what the next start will be. The installer points
+            # operators at this column, so it has to be about the process they can see.
+            Elevated    = if ($s.Opaque) { $null } else { Resolve-InstanceElevated -Name $s.Instance -ClaudePid $s.Pid }
             Opaque      = $s.Opaque
             AssetVersion = $asset
         }
