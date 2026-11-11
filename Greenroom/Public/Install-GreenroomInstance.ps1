@@ -8,10 +8,8 @@
 .DESCRIPTION
 
   It provisions an INSTANCE. It does not install the software -- that already happened,
-  or you could not be calling this. The script it replaces did both: it copied its own
-  scripts into a bin directory and generated a cmd shim, which is what a package
-  manager is for. That is roughly 130 lines that no longer exist, along with
-  -InstallDir and the PATH warning that went with them.
+  or you could not be calling this. Copying scripts into a bin directory and generating a
+  cmd shim is a package manager's job, so there is no -InstallDir and no PATH warning.
 
   Idempotent, and that is load-bearing rather than a nicety: omitting a parameter
   INHERITS what the previous install recorded rather than falling back to a default.

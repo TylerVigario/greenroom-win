@@ -103,12 +103,13 @@ That is why there is no source setting: the list would have to track someone els
 distribution matrix — native, npm, WinGet, two Homebrew casks, apt, dnf, apk — and PATH
 already encodes your answer.
 
-> Until 0.4.0 a hard-coded WinGet Links entry came first, on the grounds that its path is
-> keyed on package ID rather than version and so survives upgrades. True, but every Windows
-> install path for this CLI is version-stable, so it bought nothing — while silently
-> outranking newer installs. A package-manager install caps itself at whatever the manifest
-> offers, which `claude doctor` reports as `Auto-updates: Managed by package manager`, so a
-> host with both ran the one that could not update itself.
+> Ranking a hard-coded WinGet Links entry above PATH was considered and rejected. The
+> argument for it is that its path is keyed on package ID rather than version and so
+> survives upgrades — true, but every Windows install path for this CLI is version-stable,
+> so it buys nothing while silently outranking newer installs. A package-manager install
+> caps itself at whatever the manifest offers, which `claude doctor` reports as
+> `Auto-updates: Managed by package manager`, so a host with both would run the one that
+> cannot update itself.
 
 Excluded as never-valid targets: `Program Files\WindowsApps` (Store Desktop),
 `AnthropicClaude` (standalone Desktop), and `AppData\Roaming\Claude\claude-code`

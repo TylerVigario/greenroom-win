@@ -102,10 +102,13 @@ launched with `--name <instance>` and Claude Code renders the title as
 `<glyph> <name>`. Don't. The title belongs to Claude Code, not to greenroom, and
 a session sitting at a trust prompt or a `/login` screen has not applied `--name`
 yet — so it has no matching title at all, which is exactly when the operator needs
-to attach. A title fallback also hides the failure that actually matters: capture
-silently not working looks perfectly healthy right up until the day it resolves
-someone else's window. One source makes a capture failure loud on the first
-attach, and `Restart-GreenroomSession <instance>` fixes it in one step.
+to attach. Nor is there anything directory-shaped to fall back to: without `--name`
+the title is `Claude Code` until the conversation acquires an auto-generated title,
+and then it is *that*, which changes as the conversation does and is never tied to
+the working directory. A title fallback also hides the failure that actually
+matters: capture silently not working looks perfectly healthy right up until the
+day it resolves someone else's window. One source makes a capture failure loud on
+the first attach, and `Restart-GreenroomSession <instance>` fixes it in one step.
 
 The stored handle is **validated on every use, never trusted**, against a single
 invariant: the record must have been written for the session being acted on. Both
@@ -120,14 +123,9 @@ than doing nothing.
 `--name` is still passed, because a window titled `✳ laptop-admin` is easier to
 read than `Claude Code`. Nothing depends on it.
 
-> **Earlier revisions of this document prescribed title matching as the fix, and
-> before that claimed Claude Code titles the window with the working directory's
-> leaf name.** The leaf claim was simply wrong: without `--name` the title is
-> `Claude Code` until the conversation acquires an auto-generated title, and then
-> it is *that*, which changes as the conversation does and is never tied to the
-> directory. The failure was masked because resolution short-circuited whenever
-> the host process owned only one window — the single-instance case, where the
-> answer is right by luck.
+**Test window resolution on a host running two instances.** A single-instance host
+cannot tell a working scheme from a broken one: the host process owns exactly one
+window, so anything at all short-circuits to the right answer and is right by luck.
 
 ## 5. An elevated session cannot be attached from an unelevated shell
 
