@@ -7,9 +7,23 @@
 
 .DESCRIPTION
 
-  NEVER touches the working directory -- it holds your work. Trust entries in
-  ~/.claude.json are also left alone, which is a known gap rather than a decision:
-  install seeds two per instance and nothing removes them.
+  NEVER touches the working directory -- it holds your work. The two trust entries
+  install seeded in ~/.claude.json are left alone too, and that is a DECISION rather
+  than a gap: Claude Code removes them itself, and they are its data, not greenroom's.
+
+      $r = Uninstall-GreenroomInstance -Name modtest
+      claude purge --dry-run $r.WorkingDirectory     # then again without --dry-run
+
+  MEASURED against 2.1.322: `claude purge <dir>` finds and removes BOTH slash forms in
+  one pass -- the part that makes them tedious to clear by hand -- and --dry-run prints
+  the plan first. WorkingDirectory is on the result so that argument is to hand.
+
+  READ THAT PLAN, because it deletes more than the trust entries. On a directory a
+  session has actually worked in it also removes the project's transcripts and memory/,
+  its file-edit history, and its prompts from history.jsonl. That makes it right for a
+  throwaway instance and wrong for a directory whose conversation you want to keep. In
+  that second case leave the entry alone: it trusts a DIRECTORY, not an instance, and
+  nothing starts there any more.
 
   A third of the script this replaces is simply gone. -InstallDir and -RemoveScripts
   existed to delete copied scripts and a generated cmd shim out of a bin directory,
@@ -138,6 +152,13 @@ function Uninstall-GreenroomInstance {
             Remove-Item -LiteralPath $stateDir -Recurse -Force
             $stateRemoved = $true
             Write-Verbose "state removed: $stateDir"
+        }
+
+        # The trust entries outlive the instance deliberately -- see the description for
+        # why, and for what `claude purge` takes with them.
+        if ($cfg -and $cfg.workingDirectory) {
+            Write-Verbose ("trust entries for $($cfg.workingDirectory) left in place -- " +
+                           'claude purge removes them, and that project''s transcripts with them')
         }
 
         # Returned rather than printed. The facts about what survived are the ones an

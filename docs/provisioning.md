@@ -379,3 +379,32 @@ that finds trust already in place writes nothing and copies nothing.
 `-NoTrustSeed` declines it entirely — run `claude` once in the working directory and
 accept the dialog yourself, and greenroom then touches nothing but
 `~\.claude\greenroom\<instance>`.
+
+### Removing it again
+
+`Uninstall-GreenroomInstance` leaves the two entries behind, deliberately. Claude Code
+removes them itself, and they are its data rather than greenroom's:
+
+```powershell
+$r = Uninstall-GreenroomInstance -Name modtest
+claude purge --dry-run $r.WorkingDirectory   # then again without --dry-run
+```
+
+MEASURED against 2.1.322: `claude purge <dir>` finds and removes **both** slash forms in
+one pass — which is the part that makes them tedious to clear by hand — and `--dry-run`
+prints the plan before anything goes.
+
+**Read that plan**, because it removes more than the trust entry. On a directory a
+session has actually worked in:
+
+```
+  dir:    ~\.claude\file-history\<session uuid>
+  dir:    ~\.claude\projects\<slug>         project transcripts (.jsonl) and memory/
+  config: projects["C:/Users/.../probe"]    project entry in ~/.claude.json
+  config: projects["C:\Users\...\probe"]    project entry in ~/.claude.json
+  filter: ~\.claude\history.jsonl           prompts typed in this project
+```
+
+So it is the right tool for a throwaway instance and the wrong one for a directory whose
+conversation you want to keep. In that second case leave the entry: it trusts a
+**directory**, not an instance, and nothing starts there any more.
