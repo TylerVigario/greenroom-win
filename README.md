@@ -1,5 +1,9 @@
 # greenroom-win
 
+[![PowerShell Gallery](https://img.shields.io/powershellgallery/v/Greenroom?label=PowerShell%20Gallery)](https://www.powershellgallery.com/packages/Greenroom)
+[![CI](https://github.com/TylerVigario/greenroom-win/actions/workflows/ci.yml/badge.svg)](https://github.com/TylerVigario/greenroom-win/actions/workflows/ci.yml)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
+
 Always-on **Claude Code Remote Control** sessions on Windows. Each instance starts
 hidden at logon, stays supervised, and is revealed on demand with its full live
 scrollback — not a resumed copy.
@@ -50,10 +54,13 @@ Install-PackageProvider NuGet -Force -Scope CurrentUser   # once per host
 Install-Module Greenroom -Scope CurrentUser -Force
 ```
 
-**Before a real install, read [docs/provisioning.md](docs/provisioning.md).** Two
-prerequisites fail *silently* if unmet — a CLI without `--remote-control`, and
-`defaultShell: "bash"` on a host where `bash` does not resolve. The installer checks
-both, but knowing why matters when something is off.
+**Before a real install, read [docs/provisioning.md](docs/provisioning.md).** Three
+prerequisites fail *silently* if unmet — a CLI without `--remote-control`,
+`defaultShell: "bash"` on a host where `bash` does not resolve, and credentials that
+are not a full `claude.ai` login: Remote Control rejects `claude setup-token` and says
+nothing about it. **The installer checks the first two and cannot check the third** —
+run `claude` once in the working directory, `/login`, and confirm `/rc active` appears
+in the footer.
 
 Then confirm it for yourself — a green line from the installer does not prove the
 things it cannot observe: [docs/troubleshooting.md](docs/troubleshooting.md#did-it-actually-work).
@@ -86,6 +93,15 @@ anyone can clone, and it is conveyed separately.
 
 Everything else — settings shape, host prerequisites, branch protection payload — is
 in the tree.
+
+**The Claude Code CLI has background sessions of its own now** (`claude --bg`), so the
+fair question is whether they replace the middle of this chain. Measured against
+2.1.322: not on a host that mixes elevated and unelevated instances. There is one
+daemon per user and it holds one integrity level, so the elevated instance either stops
+the others from starting at all or is silently de-elevated, depending only on which
+started first. Nothing starts the daemon at logon either.
+[Issue #103](https://github.com/TylerVigario/greenroom-win/issues/103) has both
+directions, measured.
 
 ---
 
@@ -152,7 +168,10 @@ what a command decided and why, including the specific reason a window could not
 resolved.
 
 Uninstalling never touches the working directory, and leaves trust entries in
-`~/.claude.json` in place. `-KeepState` also keeps `~/.claude/greenroom/<instance>`.
+`~/.claude.json` in place — `claude purge <dir>` is what removes those, both slash
+forms in one pass, and `--dry-run` prints the plan first. Read that plan: on a
+directory a session has worked in it also takes the transcripts and `memory/`.
+`-KeepState` also keeps `~/.claude/greenroom/<instance>`.
 
 No PATH entry, no shim, no profile change: the module resolves by name once it is on
 the module path.
@@ -178,24 +197,36 @@ at the next restart.
 
 **Omitting a parameter INHERITS it** from the previous install rather than falling
 back to a default. That is load-bearing, not a nicety: a bare re-run that reset the
-working directory used to relocate the instance and abandon its project store.
-Clearing is explicit — `-AdditionalDirectories @()`, `-ClaudeExe ''`.
+working directory to a default would relocate the instance and abandon its project
+store. Clearing is explicit — `-AdditionalDirectories @()`, `-ClaudeExe ''`.
 
 ---
 
 ## How it works
 
 ```
-Task Scheduler  (at logon, +delay, Interactive, no elevation)
+Task Scheduler  (at logon, +delay, Interactive, non-elevated by default)
   └── wscript.exe greenroom-watchdog.vbs <instance>        ← born hidden, SW_HIDE
         └── <shell> greenroom-watchdog.ps1 -Instance <name> ← supervisor, 1s poll
-              └── wt.exe -w new  (hidden)
+              └── wt.exe -w new --title <token>  (hidden)   ← names the new window
                     └── <shell> greenroom-launch.ps1 -Instance <name>
-                          └── claude.exe --remote-control <name> [--add-dir ...]
+                          └── claude.exe --remote-control <name> --name <name>
+                                         [--add-dir ...] --resume <id>
 ```
 
 `<shell>` is pwsh 7 where it is installed, otherwise the in-box Windows PowerShell 5.1
 (`powershell.exe`) — resolved per host, pwsh preferred.
+
+**`--resume <id>` is what makes these *always-on* rather than *restarted*.** The
+launcher pins one conversation id and resumes that exact id on every launch after the
+first, so a crashed session or a rebooted host comes back to the same conversation
+instead of a fresh one. Reaching for the newest conversation instead would quietly
+adopt one somebody started by hand in the same directory.
+
+**`--title <token>` is how the watchdog knows which window it just made.** Windows
+Terminal hosts every window in one process and exposes no mapping back to the process
+inside, so two instances starting in the same second are otherwise indistinguishable
+— [gotchas.md §4](docs/gotchas.md).
 
 | Path | |
 |---|---|
