@@ -203,10 +203,9 @@ function Install-GreenroomInstance {
                            "Install-GreenroomInstance -Name $($s.Instance) -Elevated:`$false")
         }
 
-        # REVOKING USED TO PRINT NOTHING AT ALL, which made it indistinguishable from an
-        # ordinary re-run -- the wrong direction for a security-relevant setting to fail
-        # in. On the Warning stream, like the grant it mirrors, so it is visible without
-        # -Verbose.
+        # A REVOKE THAT PRINTS NOTHING is indistinguishable from an ordinary re-run,
+        # which is the wrong direction for a security-relevant setting to fail in. On the
+        # Warning stream, like the grant it mirrors, so it is visible without -Verbose.
         if ($wasElevated -and -not $s.Elevated) {
             Write-Warning "'$($s.Instance)': elevation REVOKED -- the task is now RunLevel Limited."
         }

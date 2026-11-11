@@ -97,9 +97,9 @@ function Update-GreenroomInstance {
         return
     }
 
-    # One result per matching instance, INCLUDING the ones left alone. "Already current"
-    # used to be a verbose message, so a run that changed nothing and a run that moved
-    # everything looked the same at the prompt -- which is the question this command
+    # One result per matching instance, INCLUDING the ones left alone. With "already
+    # current" on the verbose stream instead, a run that changed nothing and a run that
+    # moved everything look the same at the prompt -- which is the question this command
     # exists to answer.
     #
     # A scriptblock rather than a nested function: a New- verb without ShouldProcess is an
