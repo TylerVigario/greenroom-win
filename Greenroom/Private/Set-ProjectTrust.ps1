@@ -271,11 +271,11 @@ function Set-ProjectTrust {
         return $false
     }
 
-    # BACKED UP ONLY WHEN WRITTEN, and only the last few kept. It used to copy the whole
-    # file on every install and update -- including every one that found trust already in
-    # place and wrote nothing -- and never removed a copy: one instance had 12, going back
-    # months. The copy is taken immediately before the write, so it is the file as it was
-    # when it was replaced.
+    # BACKED UP ONLY WHEN WRITTEN, and only the last few kept. Copying the whole file on
+    # every install and update -- including every run that finds trust already in place
+    # and writes nothing -- accumulates with nothing to remove it: one instance reached
+    # 12 copies, going back months. The copy is taken immediately before the write, so it
+    # is the file as it was when it was replaced.
     if (-not (Test-Path $BackupDir)) { New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null }
     $backup = Join-Path $BackupDir ('claude.json.backup-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
     Copy-Item $file $backup -Force
@@ -311,10 +311,10 @@ function Test-TrustSurvived {
     # This is a boolean predicate and must never throw: Install-GreenroomInstance calls it
     # without a try/catch, so an exception here would ABORT the install instead of letting
     # it re-seed. A READ failure is environmental -- quiet $false, the caller re-seeds. A
-    # PARSE failure is a real anomaly, so it is surfaced (Write-Warning, not silently
-    # swallowed the way the old blanket catch was) and still reported as not-survived. The
-    # 5.1 -AsHashtable bind error that old catch used to hide is gone now that Read-ClaudeProjectMap
-    # is edition-aware.
+    # PARSE failure is a real anomaly, so it is surfaced with Write-Warning rather than
+    # swallowed, and still reported as not-survived. A blanket catch here would hide it,
+    # and on 5.1 would hide an -AsHashtable bind error with it -- which is why
+    # Read-ClaudeProjectMap is edition-aware rather than guarded by one.
     $raw = try { Read-Utf8File $file } catch { return $false }
     $projects = try { Read-ClaudeProjectMap $raw }
                 catch { Write-Warning "~/.claude.json did not parse while verifying trust for '$Directory': $($_.Exception.Message)"; return $false }

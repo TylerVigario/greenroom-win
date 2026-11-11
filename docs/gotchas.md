@@ -208,10 +208,9 @@ That makes both defences necessary rather than belt-and-braces:
 - `Assert-CanActOnInstance` checks `config.json` *before* acting, so an unelevated shell
   escalates rather than walking into a refusal it cannot detect;
 - and every show/hide **verifies by observation afterwards** and reports failure
-  loudly. It previously piped `ShowWindow` to `Out-Null` and printed `attached`
-  unconditionally — meaning any no-op, from any cause, read as success. That bug
-  predates elevation and would have misreported a stale-window case just as
-  happily.
+  loudly. Piping `ShowWindow` to `Out-Null` and reporting success unconditionally
+  makes any no-op, from any cause, read as success — and not only this one: a
+  stale window would be misreported just as happily.
 
 The same probe confirmed the reads that still work, which is what keeps `list`
 useful from an ordinary shell:
