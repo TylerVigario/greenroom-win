@@ -45,13 +45,18 @@
   "nothing needed doing" is an answer rather than silence. Action is one of:
 
     Updated      re-registered on this version and restarted; ClaudePid is the new session
-    Registered   re-registered, not restarted (-NoRestart); the running session is still
-                 the old code until it next starts
+    Registered   re-registered, not restarted: under -NoRestart, when the instance is the
+                 session this shell runs inside (a warning names the restart to run from
+                 outside it), or when the restart failed (an error says why). The task
+                 names the new assets; the session is not running them yet
     Current      already runs this version, untouched
     Unversioned  runs from a path carrying no version, untouched (-Force re-registers)
     ClaudeMissing  would be Current or Unversioned, but the claude.exe its config.json records
                  no longer exists, so it cannot start a session; untouched, and a warning
                  says how to fix it (-Force re-registers, which finds Claude Code again)
+    Refused      not attempted, because this shell is known to be unable to register the
+                 task: the instance runs elevated, or its task is owned by Administrators.
+                 Nothing is changed, and the error says what to run instead
     Failed       re-registration failed and the instance stays on From; the error says why
 
   From is the version the task ran before, To the version loaded here. Nothing is emitted
@@ -159,7 +164,12 @@ function Update-GreenroomInstance {
         # ambiguous falls through to the attempt, which now fails loudly. A Refused row
         # and a Failed row say different things on purpose: Refused means nothing was
         # tried and the instance is untouched; Failed means an attempt broke partway.
-        $blocked = Test-TaskRewritable -Name $n
+        #
+        # Install- makes the same check before it writes anything, so this is not the only
+        # guard. It is here as well because only here can the answer be a Refused row
+        # rather than a Failed one. -Elevated is the configured value, which is what the
+        # re-registration below inherits.
+        $blocked = Get-TaskRewriteBlocker -Name $n -Elevated (Test-InstanceElevated -Name $n)
         if ($blocked) {
             Write-Error -ErrorAction Continue -Message (
                 "refusing to update '$n', it stays on $from -- $blocked " +
@@ -198,10 +208,36 @@ function Update-GreenroomInstance {
             continue
         }
 
+        # The session this shell runs inside cannot be restarted from here -- Restart-
+        # refuses, because the kill would take this process with it before the task is
+        # started again. For an admin lane updating the host it runs on, that is the
+        # expected case rather than a failure, so it is said as the next step to take. The
+        # task already names the new assets.
+        if (Test-SelfIsInstance -Name $n) {
+            Write-Warning ("'$n' is re-registered on $to but is still running $from, because it is " +
+                           'the session this shell runs inside and cannot be restarted from here. ' +
+                           "From a shell outside it: Restart-GreenroomSession $n")
+            & $result $n 'Registered' $asset $null
+            continue
+        }
+
+        # Caught rather than left to propagate, for the reason the Install- catch above
+        # gives: under the module's ErrorActionPreference, Restart-'s own Write-Error is
+        # TERMINATING. Uncaught, one failed restart ended this loop -- every later instance
+        # left on the old version, and no row at all for this one, whose task HAD moved.
+        # Registered is the true state: the task names the new assets, and whether a
+        # session is running on them is what the error says.
+        #
         # Restart's instance row is folded into this result rather than passed through:
         # two object types in one pipeline render as one table with the wrong columns.
         # Its warnings and errors still reach the operator on their own streams.
-        $up = @(Restart-GreenroomSession -Name $n -Confirm:$false)
+        try { $up = @(Restart-GreenroomSession -Name $n -Confirm:$false) }
+        catch {
+            Write-Error -ErrorAction Continue -Message (
+                "'$n' is re-registered on $to, but restarting it failed -- $($_.Exception.Message)")
+            & $result $n 'Registered' $asset $null
+            continue
+        }
         & $result $n 'Updated' $asset ($up | Select-Object -First 1 -ExpandProperty ClaudePid -ErrorAction Ignore)
     }
 

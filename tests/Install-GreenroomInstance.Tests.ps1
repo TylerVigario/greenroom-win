@@ -293,6 +293,26 @@ Describe 'Install-GreenroomInstance' {
         { Install-GreenroomInstance -Name probe -Elevated -ErrorAction Stop } | Should -Throw '*elevated caller*'
         Should -Invoke -ModuleName Greenroom Register-GreenroomTask -Times 0
     }
+
+    It 'refuses a task owned by Administrators from an unelevated shell, before writing anything' {
+        # Registration is the last step. Refused there, config.json had already been
+        # rewritten with the new settings while the task kept the old ones.
+        WritePrevConfig @{ workingDirectory = $script:WorkDir; triggerDelay = 'PT2M' }
+        $before = Get-Content -Raw (Join-Path $script:StateRoot 'probe\config.json')
+        Mock -ModuleName Greenroom Test-SelfElevated { $false }
+        Mock -ModuleName Greenroom Get-Acl {
+            [PSCustomObject]@{ Owner = 'BUILTIN\Administrators' } |
+                Add-Member -MemberType ScriptMethod -Name GetOwner -Value {
+                    [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+                } -PassThru
+        }
+        { Install-GreenroomInstance -Name probe -TriggerDelay PT3M -ErrorAction Stop } |
+            Should -Throw '*owned by BUILTIN\Administrators*Nothing has been changed*'
+        Get-Content -Raw (Join-Path $script:StateRoot 'probe\config.json') | Should -Be $before
+        Should -Invoke -ModuleName Greenroom Register-GreenroomTask -Times 0
+        Should -Invoke -ModuleName Greenroom Set-ProjectGrant -Times 0
+        Should -Invoke -ModuleName Greenroom Set-ProjectTrust -Times 0
+    }
 }
 
 Describe 'Install-GreenroomInstance, elevated' {

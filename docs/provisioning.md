@@ -154,19 +154,29 @@ laptop-admin         Updated      0.4.0      0.5.0           17096
 render-a             Current      0.5.0      0.5.0
 ```
 
-`Action` is `Updated`, `Registered` (re-registered under `-NoRestart`, still running the old
-code), `Current`, `Unversioned` (a path carrying no version, left alone), `ClaudeMissing`,
-`Refused` or `Failed`.
+`Action` is `Updated`, `Registered`, `Current`, `Unversioned` (a path carrying no version,
+left alone), `ClaudeMissing`, `Refused` or `Failed`.
+
+**`Registered` means the task moved and the session did not.** The task names the new
+assets, but the running session is still the old code until it next starts. That is the
+answer under `-NoRestart`; for the session the shell is running inside, which cannot be
+restarted from there (a warning names the `Restart-GreenroomSession` to run from outside
+it); and when the restart itself failed, with an error saying why. A failed restart does
+not stop the run: every instance after it is still updated.
 
 **`Refused` and `Failed` are different answers.** `Refused` means nothing was attempted and
 the instance is exactly as it was; `Failed` means an attempt was made and broke. The two
 things that get refused are an instance configured `-Elevated` when the caller is not — no
-unelevated caller can register `RunLevel Highest` — and a task owned by
-`BUILTIN\Administrators`, which is how a task registered from an elevated shell ends up and
-which an unelevated caller cannot rewrite.
+unelevated caller can register `RunLevel Highest` — and a task owned by an administrative
+account (`Administrators`, `SYSTEM` or `TrustedInstaller`), which an unelevated caller
+cannot rewrite. `Install-GreenroomInstance` and `Uninstall-GreenroomInstance` refuse the
+same two things, before they write or stop anything.
 
-**So run this from an elevated shell if any instance is elevated, or if any task was ever
-registered from one.** Checking which, without changing anything:
+**A task takes its owner when it is created, and keeps it.** One created from an elevated
+shell belongs to `Administrators`; a `-Force` re-registration does not change the owner,
+whoever runs it. So the question is how each task was first made, not how it was last
+updated. Run this from an elevated shell if any instance is elevated or any task is owned
+that way. Checking, without changing anything:
 
 ```powershell
 (Get-Acl "C:\Windows\System32\Tasks\greenroom-<name>").Owner
