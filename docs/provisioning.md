@@ -164,19 +164,25 @@ restarted from there (a warning names the `Restart-GreenroomSession` to run from
 it); and when the restart itself failed, with an error saying why. A failed restart does
 not stop the run: every instance after it is still updated.
 
-**`Refused` and `Failed` are different answers.** `Refused` means nothing was attempted and
-the instance is exactly as it was; `Failed` means an attempt was made and broke. The two
-things that get refused are an instance configured `-Elevated` when the caller is not — no
-unelevated caller can register `RunLevel Highest` — and a task owned by an administrative
-account (`Administrators`, `SYSTEM` or `TrustedInstaller`), which an unelevated caller
-cannot rewrite. `Install-GreenroomInstance` and `Uninstall-GreenroomInstance` refuse the
-same two things, before they write or stop anything.
+**Some tasks cannot be registered from an ordinary shell, and those cost one UAC prompt.**
+They are an instance configured `-Elevated` — no unelevated caller can register `RunLevel
+Highest` — and a task owned by an administrative account (`Administrators`, `SYSTEM` or
+`TrustedInstaller`), which an unelevated caller cannot rewrite. From an ordinary shell
+`Update-GreenroomInstance` does not attempt them: it updates the rest, then hands all of
+them to **one** elevated copy of itself, under one prompt, and their rows come back from
+that copy after the others. Declining the prompt leaves them exactly as they were, with an
+error naming them. From an elevated shell there is nothing to hand on and no prompt.
+
+**`Refused` and `Failed` are different answers.** `Refused` is what `-NoElevate` gets in
+place of that prompt: nothing was attempted and the instance is exactly as it was. `Failed`
+means an attempt was made and broke. `Install-GreenroomInstance` refuses the same two things
+before it writes anything; `Uninstall-GreenroomInstance` escalates an elevated instance and
+refuses a task owned that way, before it stops anything.
 
 **A task takes its owner when it is created, and keeps it.** One created from an elevated
 shell belongs to `Administrators`; a `-Force` re-registration does not change the owner,
 whoever runs it. So the question is how each task was first made, not how it was last
-updated. Run this from an elevated shell if any instance is elevated or any task is owned
-that way. Checking, without changing anything:
+updated. Checking, without changing anything:
 
 ```powershell
 (Get-Acl "C:\Windows\System32\Tasks\greenroom-<name>").Owner
@@ -328,6 +334,7 @@ posture:
   `-NoElevate` to get a plain refusal instead. `Stop-` and `Restart-GreenroomSession`
   escalate the same way, but **once per command**: `Stop-GreenroomSession *` raises one
   prompt for every elevated instance it matched, after the others have been handled.
+  `Uninstall-` and `Update-GreenroomInstance` do the same for an elevated instance's task.
 - **`Get-GreenroomInstance` has a blind spot unless it is run elevated too.**
   `Win32_Process.CommandLine` reads as NULL across integrity levels, and that is how
   instances are named — so from an ordinary shell an elevated session shows as `Opaque`

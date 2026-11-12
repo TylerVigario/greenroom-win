@@ -28,6 +28,13 @@
   path carries no version is left alone: that is a module installed somewhere unversioned,
   where new files land in place and there is nothing to move.
 
+  Some tasks cannot be registered from an unelevated shell: an instance that runs
+  elevated, because registering RunLevel Highest takes an elevated caller, and any task
+  first created from an elevated shell, because Administrators then own it. Those are not
+  attempted here. They are collected and updated together at the end by ONE elevated copy
+  of this command, under one UAC prompt, as Restart-GreenroomSession does for elevated
+  sessions. -NoElevate refuses them instead.
+
 .PARAMETER Name
   Only update instances with this name. Wildcards supported. Default: every registered
   instance on the host.
@@ -39,6 +46,11 @@
 .PARAMETER NoRestart
   Re-register without restarting. The new assets take effect at the next start; until
   then the running session keeps the old ones, so the drift warning stays accurate.
+
+.PARAMETER NoElevate
+  Refuse, rather than re-launch elevated, an instance whose task this shell cannot
+  register. Each is reported Refused. Without it, all of them are updated by one elevated
+  run at the end, under one UAC prompt, and -Force and -NoRestart go with it.
 
 .OUTPUTS
   Greenroom.UpdateResult, one per matching instance -- including those left alone, so
@@ -54,13 +66,15 @@
     ClaudeMissing  would be Current or Unversioned, but the claude.exe its config.json records
                  no longer exists, so it cannot start a session; untouched, and a warning
                  says how to fix it (-Force re-registers, which finds Claude Code again)
-    Refused      not attempted, because this shell is known to be unable to register the
+    Refused      not attempted under -NoElevate, because this shell cannot register the
                  task: the instance runs elevated, or its task is owned by Administrators.
                  Nothing is changed, and the error says what to run instead
     Failed       re-registration failed and the instance stays on From; the error says why
 
-  From is the version the task ran before, To the version loaded here. Nothing is emitted
-  for an instance a -WhatIf or -Confirm declined.
+  From is the version the task ran before, To the version loaded here. An instance handed
+  to the elevated copy gets its row from that copy, after the rows for the rest. Nothing is
+  emitted for an instance a -WhatIf or -Confirm declined, or whose UAC prompt was declined;
+  the error for a declined prompt names every instance it left unchanged.
 
 .EXAMPLE
   Update-GreenroomInstance
@@ -85,8 +99,16 @@ function Update-GreenroomInstance {
         [string]$Name,
 
         [switch]$Force,
-        [switch]$NoRestart
+        [switch]$NoRestart,
+        [switch]$NoElevate
     )
+
+    begin {
+        # Instances whose task this shell cannot register, updated together in `end` by one
+        # elevated copy so that one UAC prompt covers all of them. That copy re-registers and
+        # restarts them one at a time, exactly as the loop below does.
+        $deferred = [System.Collections.Generic.List[string]]::new()
+    }
 
     process {
 
@@ -159,24 +181,24 @@ function Update-GreenroomInstance {
 
         $from = if ($asset) { $asset } else { 'an unversioned path' }
 
-        # Refuse what this shell cannot do, instead of attempting it and reporting a
-        # result the task does not reflect. Only certain causes get here -- anything
-        # ambiguous falls through to the attempt, which now fails loudly. A Refused row
-        # and a Failed row say different things on purpose: Refused means nothing was
-        # tried and the instance is untouched; Failed means an attempt broke partway.
+        # Never attempt what this shell cannot do: attempted anyway, the registration reported
+        # a result the task did not reflect. Only certain causes get here -- anything
+        # ambiguous falls through to the attempt, which fails loudly. -Elevated is the
+        # configured value, which is what the re-registration below inherits.
         #
         # Install- makes the same check before it writes anything, so this is not the only
-        # guard. It is here as well because only here can the answer be a Refused row
-        # rather than a Failed one. -Elevated is the configured value, which is what the
-        # re-registration below inherits.
+        # guard. It is here as well because only here can the instance be handed to an
+        # elevated copy, or answered with a Refused row rather than a Failed one. Those say
+        # different things on purpose: Refused means nothing was tried and the instance is
+        # untouched; Failed means an attempt broke partway.
         $blocked = Get-TaskRewriteBlocker -Name $n -Elevated (Test-InstanceElevated -Name $n)
-        if ($blocked) {
+        if ($blocked -and $NoElevate) {
             # The row BEFORE the error, here and below: a caller who asked for Stop gets the
             # error as a throw, and the row emitted after it would never be.
             & $result $n 'Refused' $asset $null
             Write-CommandError -Cmdlet $PSCmdlet -ErrorId 'UpdateRefused' -Category PermissionDenied -TargetObject $n -Message (
                 "refusing to update '$n', it stays on $from -- $blocked " +
-                'Nothing has been changed.')
+                '-NoElevate was passed, so it is not being escalated. Nothing has been changed.')
             continue
         }
 
@@ -185,9 +207,23 @@ function Update-GreenroomInstance {
         # restarting are a single decision, and prompting twice for it is noise. The inner
         # calls are told not to ask again. A declined prompt emits no result -- -WhatIf
         # has already said what would happen, and a row claiming an Action would not be true.
-        if (-not $PSCmdlet.ShouldProcess($n, "re-register $from -> $to$(if ($NoRestart) { '' } else { ' and restart' })")) {
-            continue
-        }
+        #
+        # Asked BEFORE an instance is deferred, as Restart- does: the elevated copy is a new
+        # process with its own preferences, so -WhatIf has to stop here, and -Confirm has to
+        # ask in the shell the operator is typing in.
+        $how = "re-register $from -> $to$(if ($NoRestart) { '' } else { ' and restart' })$(if ($blocked) { ', elevated' })"
+        if (-not $PSCmdlet.ShouldProcess($n, $how)) { continue }
+
+        # Handed on, not attempted. The elevated copy decides afresh -- Current, Updated,
+        # Registered for the session a shell runs inside -- and its rows are replayed here.
+        #
+        # That includes the session this shell runs inside, which this shell does not filter
+        # out: the elevated copy's own Test-SelfIsInstance finds it, because a process that
+        # UAC elevates is parented to the process that asked. Measured 2026-11-12 on the
+        # reference host: from a medium-integrity shell, Start-Process -Verb RunAs on an
+        # auto-elevating Windows binary -- the same AppInfo route, without the prompt a
+        # test cannot click -- gave a High-integrity process whose parent was that shell.
+        if ($blocked) { $deferred.Add($n); continue }
 
         try { Install-GreenroomInstance -Name $n -NoStart -Confirm:$false | Out-Null }
         catch {
@@ -243,5 +279,16 @@ function Update-GreenroomInstance {
         & $result $n 'Updated' $asset ($up | Select-Object -First 1 -ExpandProperty ClaudePid -ErrorAction Ignore)
     }
 
+    }
+
+    end {
+        # -Force and -NoRestart go with them: dropped, the elevated copy would skip an instance
+        # -Force asked for, or restart one -NoRestart said to leave running.
+        if ($deferred.Count) {
+            $carry = @()
+            if ($Force)     { $carry += 'Force' }
+            if ($NoRestart) { $carry += 'NoRestart' }
+            Invoke-DeferredElevation -Command 'Update-GreenroomInstance' -Name $deferred -Cmdlet $PSCmdlet -Forward $carry
+        }
     }
 }

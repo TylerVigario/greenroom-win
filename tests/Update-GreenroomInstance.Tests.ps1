@@ -33,6 +33,9 @@ Describe 'Update-GreenroomInstance' {
         # whether the shell running it happens to be elevated, and on what it runs inside.
         Mock -ModuleName Greenroom Get-TaskRewriteBlocker { $null }
         Mock -ModuleName Greenroom Test-SelfIsInstance { $false }
+        # Never the real one: that is a UAC prompt, or on an elevated host a real elevated
+        # run of the command against whatever is installed there.
+        Mock -ModuleName Greenroom Invoke-ElevatedSelf { [PSCustomObject]@{ ExitCode = 0; Records = @() } }
         # alpha is behind, beta is current. $script:Loaded, not $script:GreenroomModuleVersion:
         # a mock body runs in THIS file's scope, where the module's variable is $null -- which
         # made beta read as Unversioned, and the test passed for the wrong reason.
@@ -144,32 +147,37 @@ Describe 'Update-GreenroomInstance' {
         Mock -ModuleName Greenroom Get-TaskRewriteBlocker {
             if ($Name -eq 'alpha') { 'owned by BUILTIN\Administrators.' }
         }
+        # Both ways: handed to an elevated copy by default, refused under -NoElevate.
         Update-GreenroomInstance -ErrorAction SilentlyContinue
+        Update-GreenroomInstance -NoElevate -ErrorAction SilentlyContinue
         Should -Invoke -ModuleName Greenroom Install-GreenroomInstance -Times 0 `
             -ParameterFilter { $Name -eq 'alpha' }
         Should -Invoke -ModuleName Greenroom Restart-GreenroomSession -Times 0 `
             -ParameterFilter { $Name -eq 'alpha' }
     }
 
-    It 'carries on to the next instance after refusing one' {
+    It 'carries on to the next instance after refusing one under -NoElevate' {
         Mock -ModuleName Greenroom Get-InstanceAssetVersion { [version]'0.0.1' }
         Mock -ModuleName Greenroom Get-TaskRewriteBlocker {
             if ($Name -eq 'alpha') { 'owned by BUILTIN\Administrators.' }
         }
-        Update-GreenroomInstance -ErrorAction SilentlyContinue -ErrorVariable e
+        Update-GreenroomInstance -NoElevate -ErrorAction SilentlyContinue -ErrorVariable e
         Should -Invoke -ModuleName Greenroom Install-GreenroomInstance -Times 1 -Exactly `
             -ParameterFilter { $Name -eq 'beta' }
         "$e" | Should -Match 'alpha'
     }
 
-    It 'reports a refusal as Refused, not Updated or Failed' {
+    It 'reports a refusal under -NoElevate as Refused, and escalates nothing' {
         Mock -ModuleName Greenroom Get-InstanceAssetVersion { [version]'0.0.1' }
         Mock -ModuleName Greenroom Get-TaskRewriteBlocker {
             if ($Name -eq 'alpha') { 'requires an elevated caller.' }
         }
-        $rows = Update-GreenroomInstance -ErrorAction SilentlyContinue
+        $rows = Update-GreenroomInstance -NoElevate -ErrorAction SilentlyContinue -ErrorVariable e
         ($rows | Where-Object Instance -eq 'alpha').Action | Should -Be 'Refused'
         ($rows | Where-Object Instance -eq 'beta').Action  | Should -Be 'Updated'
+        $e[0].FullyQualifiedErrorId | Should -Be 'UpdateRefused,Update-GreenroomInstance'
+        "$($e[0])" | Should -Match '-NoElevate was passed'
+        Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 0
     }
 
     It 'stops at the first refusal when the caller passes -ErrorAction Stop, row first' {
@@ -180,10 +188,94 @@ Describe 'Update-GreenroomInstance' {
             if ($Name -eq 'alpha') { 'owned by BUILTIN\Administrators.' }
         }
         $script:rows = [System.Collections.Generic.List[object]]::new()
-        { Update-GreenroomInstance -ErrorAction Stop | ForEach-Object { $script:rows.Add($_) } } |
+        { Update-GreenroomInstance -NoElevate -ErrorAction Stop | ForEach-Object { $script:rows.Add($_) } } |
             Should -Throw '*refusing to update*'
         $script:rows.Action | Should -Be @('Refused')
         Should -Invoke -ModuleName Greenroom Install-GreenroomInstance -Times 0
+    }
+
+    Context 'an instance this shell cannot register, without -NoElevate' {
+
+        BeforeEach {
+            Mock -ModuleName Greenroom Get-TaskRewriteBlocker {
+                if ($Name -eq 'alpha') { 'owned by BUILTIN\Administrators.' }
+            }
+        }
+
+        It 'hands every one of them to ONE elevated run, and attempts none here' {
+            # One UAC prompt for the whole command, as Restart- and Stop- do: escalating each
+            # as it came up would ask once per instance for one decision.
+            Mock -ModuleName Greenroom Get-InstanceAssetVersion { [version]'0.0.1' }
+            Mock -ModuleName Greenroom Get-TaskRewriteBlocker { 'owned by BUILTIN\Administrators.' }
+            $rows = @(Update-GreenroomInstance)
+            Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 1 -Exactly -ParameterFilter {
+                $Command -eq 'Update-GreenroomInstance' -and ($Name -join ',') -eq 'alpha,beta'
+            }
+            Should -Invoke -ModuleName Greenroom Install-GreenroomInstance -Times 0
+            Should -Invoke -ModuleName Greenroom Restart-GreenroomSession -Times 0
+            # Its rows are the elevated copy's to give, and this one returned none.
+            $rows.Count | Should -Be 0
+        }
+
+        It 'still does the rest itself' {
+            Mock -ModuleName Greenroom Get-InstanceAssetVersion { [version]'0.0.1' }
+            $rows = @(Update-GreenroomInstance)
+            Should -Invoke -ModuleName Greenroom Install-GreenroomInstance -Times 1 -Exactly `
+                -ParameterFilter { $Name -eq 'beta' }
+            Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 1 -Exactly `
+                -ParameterFilter { ($Name -join ',') -eq 'alpha' }
+            $rows.Instance | Should -Be @('beta')
+        }
+
+        It 'carries -Force and -NoRestart to the elevated copy' {
+            # Dropped, the copy would skip what -Force asked for, or restart what -NoRestart
+            # said to leave running.
+            Update-GreenroomInstance -Force -NoRestart
+            Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 1 -Exactly -ParameterFilter {
+                $Forward -contains 'Force' -and $Forward -contains 'NoRestart' -and $Forward.Count -eq 2
+            }
+        }
+
+        It 'carries nothing it was not given' {
+            Update-GreenroomInstance
+            Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 1 -Exactly -ParameterFilter { -not $Forward }
+        }
+
+        It 'replays the elevated copy''s rows as update rows, after the rest' {
+            Mock -ModuleName Greenroom Invoke-ElevatedSelf {
+                $row = [PSCustomObject]@{ Instance = 'alpha'; Action = 'Updated'; From = '0.0.1'; To = '9.9.9'; ClaudePid = 4242 }
+                $row.PSObject.TypeNames.Insert(0, 'Deserialized.Greenroom.UpdateResult')
+                [PSCustomObject]@{ ExitCode = 0; Records = @($row) }
+            }
+            $rows = @(Update-GreenroomInstance)
+            $rows.Instance                  | Should -Be @('beta', 'alpha')
+            $rows[1].Action                 | Should -Be 'Updated'
+            $rows[1].PSObject.TypeNames[0]  | Should -Be 'Greenroom.UpdateResult'
+        }
+
+        It 'escalates nothing under -WhatIf' {
+            Update-GreenroomInstance -WhatIf
+            Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 0
+            Should -Invoke -ModuleName Greenroom Install-GreenroomInstance -Times 0
+        }
+
+        It 'reports a declined prompt as one error naming the instance, and the rest still report' {
+            # The caller's preference, set here for the reason CONTRIBUTING.md gives: the gate
+            # runs Pester under Stop, and this is a test of the default. Counted on the error
+            # STREAM, as the Stop- and Restart- tests do: a caught throw also lands in
+            # -ErrorVariable, which the operator never sees.
+            $ErrorActionPreference = 'Continue'
+            Mock -ModuleName Greenroom Invoke-ElevatedSelf {
+                throw "elevation declined or failed -- 'alpha' was not changed."
+            }
+            $out  = @(Update-GreenroomInstance 2>&1)
+            $err  = @($out | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] })
+            $rows = @($out | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] })
+            $rows.Instance                 | Should -Be @('beta')
+            $err.Count                     | Should -Be 1
+            $err[0].FullyQualifiedErrorId  | Should -Be 'ElevationDeclined,Update-GreenroomInstance'
+            "$($err[0])"                   | Should -Match "'alpha' was not changed"
+        }
     }
 
     It 'asks the blocker about the elevation the re-registration will inherit' {
@@ -418,5 +510,35 @@ Describe 'Get-MissingClaudeExe' {
             'empty'   { Config @{ workingDirectory = 'D:\w' } }
         }
         Ask | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'The elevated Update command, run for real' {
+
+    # What the elevated copy runs is a command line built as a string, so a switch it does
+    # not bind fails only when someone clicks through UAC. This runs that exact string in a
+    # real child pwsh -- without RunAs, the one part a test cannot click -- against THIS
+    # module, for a name no host has registered, so it changes nothing anywhere.
+
+    BeforeAll {
+        Mock -ModuleName Greenroom Start-Process { $script:Inner = $ArgumentList[-1]; [PSCustomObject]@{ ExitCode = 0 } }
+        InModuleScope Greenroom {
+            Invoke-ElevatedSelf -Command 'Update-GreenroomInstance' -Name 'gr-no-such-instance' `
+                -Forward 'Force', 'NoRestart' -WarningAction SilentlyContinue | Out-Null
+        }
+        $script:Out = [regex]::Match($script:Inner, "LiteralPath '([^']+\.clixml)'").Groups[1].Value
+    }
+
+    AfterAll { if ($script:Out) { Remove-Item -LiteralPath $script:Out -Force -ErrorAction Ignore } }
+
+    It 'binds every forwarded switch, exits 0, and carries the run''s warning back' {
+        $ErrorActionPreference = 'Continue'
+        $script:Inner | Should -Match ' -Force -NoRestart '
+        pwsh -NoLogo -NoProfile -Command $script:Inner 2>$null | Out-Null
+        $LASTEXITCODE | Should -Be 0
+        $rec = @(Import-Clixml -LiteralPath $script:Out)
+        $rec.Count              | Should -Be 1
+        $rec[0].GreenroomStream | Should -Be 'Warning'
+        $rec[0].Message         | Should -Match "no registered instance matches 'gr-no-such-instance'"
     }
 }
