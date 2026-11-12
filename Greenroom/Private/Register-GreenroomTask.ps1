@@ -63,8 +63,31 @@ function Register-GreenroomTask {
     # thing only when registration succeeds: if it is refused, the pre-emptive
     # unregister has already destroyed a working task and the instance stops starting
     # at logon.
+    #
+    # -ErrorAction Stop is load-bearing. Register-ScheduledTask reports `Access is
+    # denied` as a NON-TERMINATING error, so without it execution simply carries on, the
+    # caller's try/catch never fires, and the caller reports a success for a task it did
+    # not change. Measured 2026-11-11: three instances printed `Updated 0.7.2 -> 0.7.3`
+    # while their tasks were still on 0.7.2.
     Register-ScheduledTask -TaskName $task -Action $action -Trigger $trigger `
-        -Principal $principal -Settings $settings -Description $desc -Force | Out-Null
+        -Principal $principal -Settings $settings -Description $desc -Force `
+        -ErrorAction Stop | Out-Null
+
+    # Verify rather than trust the absence of an error. -ErrorAction Stop covers the
+    # failures that raise one; this covers any that do not, and costs a single query.
+    # The assets path is the thing that matters -- an upgrade that leaves the task
+    # naming the old version is the exact failure this function exists to prevent.
+    $registered = Get-ScheduledTask -TaskPath '\' -TaskName $task -ErrorAction Ignore
+    if (-not $registered) {
+        throw "task '$task' does not exist after registration reported no error"
+    }
+    $arguments = [string]$registered.Actions[0].Arguments
+    if (-not $arguments.Contains($vbs)) {
+        throw ("task '$task' still names different assets after re-registration: " +
+               "expected '$vbs', found '$arguments'. The most likely cause is that the " +
+               'task is owned by an account this shell cannot write as -- run from an ' +
+               'elevated shell.')
+    }
 
     Write-Verbose "task registered: $task (delay $TriggerDelay, RunLevel $(if ($Elevated) { 'Highest' } else { 'Limited' }))"
 }

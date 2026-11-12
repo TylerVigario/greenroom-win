@@ -154,6 +154,20 @@ function Update-GreenroomInstance {
 
         $from = if ($asset) { $asset } else { 'an unversioned path' }
 
+        # Refuse what this shell cannot do, instead of attempting it and reporting a
+        # result the task does not reflect. Only certain causes get here -- anything
+        # ambiguous falls through to the attempt, which now fails loudly. A Refused row
+        # and a Failed row say different things on purpose: Refused means nothing was
+        # tried and the instance is untouched; Failed means an attempt broke partway.
+        $blocked = Test-TaskRewritable -Name $n
+        if ($blocked) {
+            Write-Error -ErrorAction Continue -Message (
+                "refusing to update '$n', it stays on $from -- $blocked " +
+                'Nothing has been changed.')
+            & $result $n 'Refused' $asset $null
+            continue
+        }
+
         # ONE ShouldProcess for the whole per-instance update, for the same reason
         # Restart-GreenroomSession gates its three kills with one: re-registering and
         # restarting are a single decision, and prompting twice for it is noise. The inner

@@ -155,7 +155,30 @@ render-a             Current      0.5.0      0.5.0
 ```
 
 `Action` is `Updated`, `Registered` (re-registered under `-NoRestart`, still running the old
-code), `Current`, `Unversioned` (a path carrying no version, left alone) or `Failed`.
+code), `Current`, `Unversioned` (a path carrying no version, left alone), `ClaudeMissing`,
+`Refused` or `Failed`.
+
+**`Refused` and `Failed` are different answers.** `Refused` means nothing was attempted and
+the instance is exactly as it was; `Failed` means an attempt was made and broke. The two
+things that get refused are an instance configured `-Elevated` when the caller is not — no
+unelevated caller can register `RunLevel Highest` — and a task owned by
+`BUILTIN\Administrators`, which is how a task registered from an elevated shell ends up and
+which an unelevated caller cannot rewrite.
+
+**So run this from an elevated shell if any instance is elevated, or if any task was ever
+registered from one.** Checking which, without changing anything:
+
+```powershell
+(Get-Acl "C:\Windows\System32\Tasks\greenroom-<name>").Owner
+```
+
+**Read the task, not the table, when you want proof an upgrade landed:**
+
+```powershell
+Get-ScheduledTask | Where-Object TaskName -like 'greenroom-*' | ForEach-Object {
+  $v = if ($_.Actions[0].Arguments -match 'Modules\\Greenroom\\([0-9.]+)\\') { $Matches[1] }
+  '{0,-26}{1}' -f $_.TaskName, $v }
+```
 
 By hand, per instance, it is:
 
