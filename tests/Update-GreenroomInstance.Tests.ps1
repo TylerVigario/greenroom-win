@@ -29,6 +29,9 @@ Describe 'Update-GreenroomInstance' {
         Mock -ModuleName Greenroom Install-GreenroomInstance { }
         Mock -ModuleName Greenroom Get-MissingClaudeExe { $null }
         Mock -ModuleName Greenroom Restart-GreenroomSession { }
+        # Mocked rather than left to run for real, or the whole suite would depend on
+        # whether the shell running it happens to be elevated.
+        Mock -ModuleName Greenroom Test-TaskRewritable { $null }
         # alpha is behind, beta is current. $script:Loaded, not $script:GreenroomModuleVersion:
         # a mock body runs in THIS file's scope, where the module's variable is $null -- which
         # made beta read as Unversioned, and the test passed for the wrong reason.
@@ -125,6 +128,42 @@ Describe 'Update-GreenroomInstance' {
         Mock -ModuleName Greenroom Install-GreenroomInstance { throw 'nope' }
         Update-GreenroomInstance -ErrorAction SilentlyContinue
         Should -Invoke -ModuleName Greenroom Restart-GreenroomSession -Times 0
+    }
+
+    It 'does not ATTEMPT an instance it cannot register' {
+        # The failure this prevents: Register-ScheduledTask reports Access is denied as a
+        # NON-terminating error, so the attempt carried on and the instance was reported
+        # Updated while its task still named the old version.
+        Mock -ModuleName Greenroom Get-InstanceAssetVersion { [version]'0.0.1' }
+        Mock -ModuleName Greenroom Test-TaskRewritable {
+            if ($Name -eq 'alpha') { 'owned by BUILTIN\Administrators.' }
+        }
+        Update-GreenroomInstance -ErrorAction SilentlyContinue
+        Should -Invoke -ModuleName Greenroom Install-GreenroomInstance -Times 0 `
+            -ParameterFilter { $Name -eq 'alpha' }
+        Should -Invoke -ModuleName Greenroom Restart-GreenroomSession -Times 0 `
+            -ParameterFilter { $Name -eq 'alpha' }
+    }
+
+    It 'carries on to the next instance after refusing one' {
+        Mock -ModuleName Greenroom Get-InstanceAssetVersion { [version]'0.0.1' }
+        Mock -ModuleName Greenroom Test-TaskRewritable {
+            if ($Name -eq 'alpha') { 'owned by BUILTIN\Administrators.' }
+        }
+        Update-GreenroomInstance -ErrorAction SilentlyContinue -ErrorVariable e
+        Should -Invoke -ModuleName Greenroom Install-GreenroomInstance -Times 1 -Exactly `
+            -ParameterFilter { $Name -eq 'beta' }
+        "$e" | Should -Match 'alpha'
+    }
+
+    It 'reports a refusal as Refused, not Updated or Failed' {
+        Mock -ModuleName Greenroom Get-InstanceAssetVersion { [version]'0.0.1' }
+        Mock -ModuleName Greenroom Test-TaskRewritable {
+            if ($Name -eq 'alpha') { 'requires an elevated caller.' }
+        }
+        $rows = Update-GreenroomInstance -ErrorAction SilentlyContinue
+        ($rows | Where-Object Instance -eq 'alpha').Action | Should -Be 'Refused'
+        ($rows | Where-Object Instance -eq 'beta').Action  | Should -Be 'Updated'
     }
 }
 
