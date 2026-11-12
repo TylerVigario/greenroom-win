@@ -96,6 +96,42 @@ CHANGELOG.md
 `Public/` versus `Private/` is the API boundary: `Get-Command -Module Greenroom` shows
 exactly the supported surface and nothing else.
 
+## Reporting an error from a command
+
+**The module runs under `$ErrorActionPreference = 'Stop'`**, set in `Greenroom.psm1` and
+inherited by every function in it. That is deliberate: a cmdlet that fails inside the
+module throws rather than being stepped over. It also means **a bare `Write-Error` is
+terminating** — so in a command that loops over instances, or takes them from the
+pipeline, the `continue` after it never runs and the first instance it cannot act on
+ends the whole command.
+
+So an error that ends one item of a command's work goes through **`Write-CommandError`**:
+
+```powershell
+Write-CommandError -Cmdlet $PSCmdlet -ErrorId 'SessionDidNotStart' -Category OperationTimeout `
+    -TargetObject $n -Message "'$n' did not come up within $TimeoutSeconds s."
+continue
+```
+
+It behaves as a cmdlet's error does: the command carries on by default, and it stops if
+the caller passed `-ErrorAction Stop` or has a preference of `Stop`. It names the command
+the operator typed, and the id becomes `SessionDidNotStart,<command>`. A private helper
+that reports for a command takes that command's `$PSCmdlet` as `-Cmdlet` and passes it on.
+
+Neither shortcut works. `Write-Error -ErrorAction Continue` carries on even when the
+caller asked to stop, and `$PSCmdlet.WriteError()` alone throws, because the runtime
+reads the preference from the scope that calls it. `tests/CommandErrors.Tests.ps1` pins
+all of this — and calls each command **without** `-ErrorAction`, because passing
+`-ErrorAction SilentlyContinue` in a test is, on its own, enough to make the bug pass.
+
+**A test of the default sets `$ErrorActionPreference = 'Continue'` itself.** The command
+honours its caller's preference, and `ci/check.ps1` runs Pester under `Stop`, so a test
+that leaves the preference alone tests a different default under the gate than under a
+bare `Invoke-Pester`.
+
+A `throw` is still right for a refusal that should end the command outright — a bad
+parameter, or an install that would write a half-built instance.
+
 The changelog records what a release contains. Iterations live in `git log` and the pull
 request record — the repository is the diff.
 

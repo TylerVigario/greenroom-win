@@ -46,12 +46,12 @@ function Hide-GreenroomSession {
         # escalate, then gate, then act. See that function for why each step sits here.
         # Elevation first: an elevated session cannot be found from an unelevated shell.
         if (Invoke-ElevationFirst -Name $Name -Command 'Hide-GreenroomSession' -NoElevate:$NoElevate -Cmdlet $PSCmdlet) { return }
-        $target = Resolve-GreenroomTarget -Name $Name -RequireWindow
+        $target = Resolve-GreenroomTarget -Name $Name -RequireWindow -Cmdlet $PSCmdlet
         if (-not $target) { return }
 
         if (-not $PSCmdlet.ShouldProcess($target.Instance, 'Hide-GreenroomSession')) { return }
 
-        if (-not (Assert-CanActOnInstance -Name $target.Instance -Command 'Hide-GreenroomSession' -NoElevate:$NoElevate)) {
+        if (-not (Assert-CanActOnInstance -Name $target.Instance -Command 'Hide-GreenroomSession' -NoElevate:$NoElevate -Cmdlet $PSCmdlet)) {
             return
         }
 
@@ -60,6 +60,7 @@ function Hide-GreenroomSession {
             return
         }
 
-        Write-Error -Category InvalidResult -Message (Get-WindowFailureReason -Name $target.Instance)
+        Write-CommandError -Cmdlet $PSCmdlet -ErrorId 'WindowOperationFailed' -Category InvalidResult `
+            -TargetObject $target.Instance -Message (Get-WindowFailureReason -Name $target.Instance)
     }
 }

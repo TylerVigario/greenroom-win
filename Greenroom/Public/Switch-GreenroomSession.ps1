@@ -59,7 +59,7 @@ function Switch-GreenroomSession {
         # reasons documented on Show-GreenroomSession.
         # Elevation first: an elevated session cannot be found from an unelevated shell.
         if (Invoke-ElevationFirst -Name $Name -Command 'Switch-GreenroomSession' -NoElevate:$NoElevate -Cmdlet $PSCmdlet) { return }
-        $target = Resolve-GreenroomTarget -Name $Name -RequireWindow
+        $target = Resolve-GreenroomTarget -Name $Name -RequireWindow -Cmdlet $PSCmdlet
         if (-not $target) { return }
 
         # Deliberately NOT $target.Visible, which was read during discovery and may
@@ -75,7 +75,7 @@ function Switch-GreenroomSession {
         # is decided against defaults rather than against what the operator asked for.
         if (-not $PSCmdlet.ShouldProcess($target.Instance, "Switch-GreenroomSession (would $verb)")) { return }
 
-        if (-not (Assert-CanActOnInstance -Name $target.Instance -Command 'Switch-GreenroomSession' -NoElevate:$NoElevate)) {
+        if (-not (Assert-CanActOnInstance -Name $target.Instance -Command 'Switch-GreenroomSession' -NoElevate:$NoElevate -Cmdlet $PSCmdlet)) {
             return
         }
 
@@ -84,6 +84,7 @@ function Switch-GreenroomSession {
             return
         }
 
-        Write-Error -Category InvalidResult -Message (Get-WindowFailureReason -Name $target.Instance)
+        Write-CommandError -Cmdlet $PSCmdlet -ErrorId 'WindowOperationFailed' -Category InvalidResult `
+            -TargetObject $target.Instance -Message (Get-WindowFailureReason -Name $target.Instance)
     }
 }

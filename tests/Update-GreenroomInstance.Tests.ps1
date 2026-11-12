@@ -116,6 +116,11 @@ Describe 'Update-GreenroomInstance' {
         # the module sets $ErrorActionPreference = 'Stop', so a bare Write-Error is
         # TERMINATING and aborted the loop at the first failure. Every later instance was
         # left on the old version. This is the case that caught it.
+        #
+        # The CALLER's preference is set, not assumed: the command honours it, and the gate
+        # runs Pester from a script whose preference is Stop -- under which stopping at the
+        # first failure is the right answer. Continue is an interactive shell's default.
+        $ErrorActionPreference = 'Continue'
         Mock -ModuleName Greenroom Get-InstanceAssetVersion { [version]'0.0.1' }
         Mock -ModuleName Greenroom Install-GreenroomInstance {
             if ($Name -eq 'alpha') { throw 'elevation declined' }
@@ -167,6 +172,20 @@ Describe 'Update-GreenroomInstance' {
         ($rows | Where-Object Instance -eq 'beta').Action  | Should -Be 'Updated'
     }
 
+    It 'stops at the first refusal when the caller passes -ErrorAction Stop, row first' {
+        # `Write-Error -ErrorAction Continue` carried on whatever the caller asked. And the
+        # row has to go out before the error, or a throw leaves this instance with none.
+        Mock -ModuleName Greenroom Get-InstanceAssetVersion { [version]'0.0.1' }
+        Mock -ModuleName Greenroom Get-TaskRewriteBlocker {
+            if ($Name -eq 'alpha') { 'owned by BUILTIN\Administrators.' }
+        }
+        $script:rows = [System.Collections.Generic.List[object]]::new()
+        { Update-GreenroomInstance -ErrorAction Stop | ForEach-Object { $script:rows.Add($_) } } |
+            Should -Throw '*refusing to update*'
+        $script:rows.Action | Should -Be @('Refused')
+        Should -Invoke -ModuleName Greenroom Install-GreenroomInstance -Times 0
+    }
+
     It 'asks the blocker about the elevation the re-registration will inherit' {
         # The configured value: Install- inherits it, so it is what will be registered.
         Mock -ModuleName Greenroom Test-InstanceElevated { $Name -eq 'alpha' }
@@ -178,6 +197,8 @@ Describe 'Update-GreenroomInstance' {
     It 'carries on to the next instance when a RESTART fails, with no -ErrorAction supplied' {
         # Restart-'s Write-Error is terminating under the module's ErrorActionPreference, so
         # uncaught it ended the loop after the first instance's task had already moved.
+        # The caller's preference is set for the reason given in the test above.
+        $ErrorActionPreference = 'Continue'
         Mock -ModuleName Greenroom Get-InstanceAssetVersion { [version]'0.0.1' }
         Mock -ModuleName Greenroom Restart-GreenroomSession {
             # -ErrorAction Stop, because a mock body runs in this file's scope and not the

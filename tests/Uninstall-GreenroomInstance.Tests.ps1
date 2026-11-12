@@ -119,6 +119,19 @@ Describe 'Uninstall-GreenroomInstance' {
         @('probe', 'second') | Uninstall-GreenroomInstance | Out-Null
         Should -Invoke -ModuleName Greenroom Unregister-ScheduledTask -Times 2 -Exactly
     }
+
+    It 'carries on past a name that is not installed, with no -ErrorAction supplied' {
+        # The module's Stop preference made the not-installed error terminating, so the
+        # rest of the pipeline was abandoned. The caller's default is set here explicitly.
+        $ErrorActionPreference = 'Continue'
+        Mock -ModuleName Greenroom Get-ScheduledTask {
+            if ('greenroom-probe' -like $TaskName) { [PSCustomObject]@{ TaskName = 'greenroom-probe' } }
+        }
+        $r = @('ghost', 'probe' | Uninstall-GreenroomInstance -ErrorVariable e 2>$null)
+        $r.Instance | Should -Be @('probe')
+        Test-Path $script:InstanceDir | Should -BeFalse
+        $e[0].FullyQualifiedErrorId | Should -Be 'InstanceNotInstalled,Uninstall-GreenroomInstance'
+    }
 }
 
 Describe 'Uninstall-GreenroomInstance with a name that is not an instance' {

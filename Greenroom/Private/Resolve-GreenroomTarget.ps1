@@ -12,6 +12,12 @@
   Resolves through the public Get-GreenroomInstance rather than re-implementing
   discovery, so it cannot disagree with what a listing reports and gets the
   opaque-process handling for free.
+
+  Errors go through the CALLER's cmdlet, as Resolve-InstanceName's do: they name the
+  command that was typed, and they let a pipeline of names carry on past one that does
+  not resolve. A Write-Error here would be terminating under the module's Stop
+  preference, so `'a','b' | Show-GreenroomSession` would stop at the first name that is
+  not running.
 #>
 function Resolve-GreenroomTarget {
     [CmdletBinding()]
@@ -20,7 +26,9 @@ function Resolve-GreenroomTarget {
         [AllowEmptyString()][string]$Name,
 
         # Window resolution only matters to callers that are about to touch a window.
-        [switch]$RequireWindow
+        [switch]$RequireWindow,
+
+        [Parameter(Mandatory)][System.Management.Automation.PSCmdlet]$Cmdlet
     )
 
     $found = if ($Name) { @(Get-GreenroomInstance -Name $Name) } else { @(Get-GreenroomInstance) }
@@ -28,12 +36,12 @@ function Resolve-GreenroomTarget {
     if ($found.Count -eq 0) {
         $msg = if ($Name) { "no greenroom session named '$Name' is running." }
                else { 'no greenroom session is running.' }
-        Write-Error -Category ObjectNotFound -Message $msg
+        Write-CommandError -Cmdlet $Cmdlet -ErrorId 'SessionNotRunning' -Category ObjectNotFound -TargetObject $Name -Message $msg
         return $null
     }
 
     if ($found.Count -gt 1) {
-        Write-Error -Category InvalidArgument -Message (
+        Write-CommandError -Cmdlet $Cmdlet -ErrorId 'SessionAmbiguous' -Category InvalidArgument -TargetObject $Name -Message (
             "several sessions match: $($found.Instance -join ', '). Name one, or pipe a single instance in.")
         return $null
     }
@@ -41,7 +49,7 @@ function Resolve-GreenroomTarget {
     $target = $found[0]
 
     if ($target.Opaque) {
-        Write-Error -Category PermissionDenied -Message (
+        Write-CommandError -Cmdlet $Cmdlet -ErrorId 'SessionUnidentifiable' -Category PermissionDenied -TargetObject $target.Instance -Message (
             "'$($target.Instance)' cannot be identified from this shell -- its command line reads as NULL " +
             'across the integrity boundary, which is how an elevated process looks from an unelevated one. ' +
             'Re-run from an elevated shell.')
@@ -49,7 +57,7 @@ function Resolve-GreenroomTarget {
     }
 
     if ($RequireWindow -and $null -eq $target.Window) {
-        Write-Error -Category ObjectNotFound -Message (
+        Write-CommandError -Cmdlet $Cmdlet -ErrorId 'WindowRecordMissing' -Category ObjectNotFound -TargetObject $target.Instance -Message (
             "no usable window record for '$($target.Instance)', so its window cannot be resolved. " +
             "Re-run with -Verbose for the specific reason, then: Restart-GreenroomSession -Name $($target.Instance)")
         return $null

@@ -190,7 +190,7 @@ function Write-ForwardedRecord {
                 if (-not $id) { $id = 'ElevatedRunError' }
                 $cat = [System.Management.Automation.ErrorCategory]::NotSpecified
                 [void][Enum]::TryParse([string]$r.Category, [ref]$cat)
-                $Cmdlet.WriteError([System.Management.Automation.ErrorRecord]::new(
+                Write-CommandError -Cmdlet $Cmdlet -ErrorRecord ([System.Management.Automation.ErrorRecord]::new(
                     [System.InvalidOperationException]::new([string]$r.Message), $id, $cat, $null))
             }
         }
@@ -229,7 +229,7 @@ function Invoke-DeferredElevation {
     if ($Forward) { $extra.Forward = $Forward }
     try { $run = Invoke-ElevatedSelf -Command $Command -Name $Name @extra }
     catch {
-        $Cmdlet.WriteError([System.Management.Automation.ErrorRecord]::new(
+        Write-CommandError -Cmdlet $Cmdlet -ErrorRecord ([System.Management.Automation.ErrorRecord]::new(
             [System.OperationCanceledException]::new($_.Exception.Message, $_.Exception),
             'ElevationDeclined', [System.Management.Automation.ErrorCategory]::PermissionDenied, $Name))
         return
@@ -242,7 +242,7 @@ function Invoke-DeferredElevation {
     # would be one failure reported twice.
     if ($run.ExitCode -ne 0 -and $reported.Count -eq 0) {
         $list = ($Name | ForEach-Object { "'$_'" }) -join ', '
-        $Cmdlet.WriteError([System.Management.Automation.ErrorRecord]::new(
+        Write-CommandError -Cmdlet $Cmdlet -ErrorRecord ([System.Management.Automation.ErrorRecord]::new(
             [System.InvalidOperationException]::new(
                 "the elevated '$Command' for $list exited with code $($run.ExitCode) and reported " +
                 "nothing back; run '$Command' from an elevated shell to see why."),
@@ -269,7 +269,13 @@ function Assert-CanActOnInstance {
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][string]$Command,
         [switch]$NoElevate,
-        [System.Collections.Generic.List[string]]$Defer
+        [System.Collections.Generic.List[string]]$Defer,
+
+        # The calling command's, so a refusal names the command that was typed and lets a
+        # loop carry on past it. Every public caller passes it. Without it, the error is
+        # written here and is terminating under the module's Stop preference, so the
+        # `return $false` after it -- the whole contract of this function -- never runs.
+        [System.Management.Automation.PSCmdlet]$Cmdlet
     )
 
     # config.json is readable at any integrity level, so its flag is trustworthy even
@@ -290,11 +296,12 @@ function Assert-CanActOnInstance {
     }
 
     if ($NoElevate) {
-        Write-Error -Category PermissionDenied -Message (
-            "'$Name' runs ELEVATED and this shell does not. UIPI blocks ShowWindow and " +
-            'SetForegroundWindow from a lower integrity level, so the operation would report ' +
-            'success and do nothing at all. -NoElevate was passed, so this is not being ' +
-            'escalated automatically.')
+        $msg = ("'$Name' runs ELEVATED and this shell does not. UIPI blocks ShowWindow and " +
+                'SetForegroundWindow from a lower integrity level, so the operation would report ' +
+                'success and do nothing at all. -NoElevate was passed, so this is not being ' +
+                'escalated automatically.')
+        if ($Cmdlet) { Write-CommandError -Cmdlet $Cmdlet -ErrorId 'ElevationRefused' -Category PermissionDenied -TargetObject $Name -Message $msg }
+        else         { Write-Error -Category PermissionDenied -Message $msg }
         return $false
     }
 
@@ -308,7 +315,9 @@ function Assert-CanActOnInstance {
     $reported = @(Write-ForwardedRecord -Record $run.Records)
     if ($run.ExitCode -ne 0 -or $reported.Count) {
         $why = if ($reported.Count) { $reported -join '; ' } else { "exited with code $($run.ExitCode) and reported nothing back" }
-        Write-Error "the elevated '$Command' for '$Name' failed: $why"
+        $msg = "the elevated '$Command' for '$Name' failed: $why"
+        if ($Cmdlet) { Write-CommandError -Cmdlet $Cmdlet -ErrorId 'ElevatedRunFailed' -TargetObject $Name -Message $msg }
+        else         { Write-Error -Message $msg }
     }
     return $false
 }
@@ -346,6 +355,6 @@ function Invoke-ElevationFirst {
     if (-not $n -or [System.Management.Automation.WildcardPattern]::ContainsWildcardCharacters($n)) { return $false }
     if (-not (Test-InstanceElevated -Name $n)) { return $false }
     if (-not $Cmdlet.ShouldProcess($n, $Command)) { return $true }
-    [void](Assert-CanActOnInstance -Name $n -Command $Command -NoElevate:$NoElevate)
+    [void](Assert-CanActOnInstance -Name $n -Command $Command -NoElevate:$NoElevate -Cmdlet $Cmdlet)
     return $true
 }

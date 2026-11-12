@@ -171,10 +171,12 @@ function Update-GreenroomInstance {
         # re-registration below inherits.
         $blocked = Get-TaskRewriteBlocker -Name $n -Elevated (Test-InstanceElevated -Name $n)
         if ($blocked) {
-            Write-Error -ErrorAction Continue -Message (
+            # The row BEFORE the error, here and below: a caller who asked for Stop gets the
+            # error as a throw, and the row emitted after it would never be.
+            & $result $n 'Refused' $asset $null
+            Write-CommandError -Cmdlet $PSCmdlet -ErrorId 'UpdateRefused' -Category PermissionDenied -TargetObject $n -Message (
                 "refusing to update '$n', it stays on $from -- $blocked " +
                 'Nothing has been changed.')
-            & $result $n 'Refused' $asset $null
             continue
         }
 
@@ -189,15 +191,15 @@ function Update-GreenroomInstance {
 
         try { Install-GreenroomInstance -Name $n -NoStart -Confirm:$false | Out-Null }
         catch {
-            # -ErrorAction Continue ON THE Write-Error ITSELF, and it is load-bearing. The
-            # module sets $ErrorActionPreference = 'Stop', which functions here inherit, so
-            # a bare Write-Error is TERMINATING and would abort the loop at the first
-            # failure -- stranding every later instance on the old version, which is the
-            # opposite of the intent. Measured: without this, a throw on the first instance
-            # stopped the second from being re-registered at all.
-            Write-Error -ErrorAction Continue -Message (
-                "re-registering '$n' failed, it stays on $from -- $($_.Exception.Message)")
+            # Write-CommandError, and it is load-bearing. The module sets
+            # $ErrorActionPreference = 'Stop', which functions here inherit, so a bare
+            # Write-Error is TERMINATING and would abort the loop at the first failure --
+            # stranding every later instance on the old version. Measured: a throw on the
+            # first instance stopped the second from being re-registered at all. Unlike
+            # `Write-Error -ErrorAction Continue`, it still stops when the CALLER asks to.
             & $result $n 'Failed' $asset $null
+            Write-CommandError -Cmdlet $PSCmdlet -ErrorId 'UpdateFailed' -Category InvalidOperation -TargetObject $n -Message (
+                "re-registering '$n' failed, it stays on $from -- $($_.Exception.Message)")
             continue
         }
 
@@ -221,11 +223,11 @@ function Update-GreenroomInstance {
             continue
         }
 
-        # Caught rather than left to propagate, for the reason the Install- catch above
-        # gives: under the module's ErrorActionPreference, Restart-'s own Write-Error is
-        # TERMINATING. Uncaught, one failed restart ended this loop -- every later instance
-        # left on the old version, and no row at all for this one, whose task HAD moved.
-        # Registered is the true state: the task names the new assets, and whether a
+        # Caught rather than left to propagate. Called from in here, where the preference
+        # is the module's Stop, Restart-'s errors are TERMINATING -- by design, so that this
+        # loop sees them. Uncaught, one failed restart would end this loop: every later
+        # instance left on the old version, and no row at all for this one, whose task HAS
+        # moved. Registered is the true state: the task names the new assets, and whether a
         # session is running on them is what the error says.
         #
         # Restart's instance row is folded into this result rather than passed through:
@@ -233,9 +235,9 @@ function Update-GreenroomInstance {
         # Its warnings and errors still reach the operator on their own streams.
         try { $up = @(Restart-GreenroomSession -Name $n -Confirm:$false) }
         catch {
-            Write-Error -ErrorAction Continue -Message (
-                "'$n' is re-registered on $to, but restarting it failed -- $($_.Exception.Message)")
             & $result $n 'Registered' $asset $null
+            Write-CommandError -Cmdlet $PSCmdlet -ErrorId 'RestartFailed' -Category InvalidOperation -TargetObject $n -Message (
+                "'$n' is re-registered on $to, but restarting it failed -- $($_.Exception.Message)")
             continue
         }
         & $result $n 'Updated' $asset ($up | Select-Object -First 1 -ExpandProperty ClaudePid -ErrorAction Ignore)

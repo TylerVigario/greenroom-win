@@ -97,7 +97,7 @@ function Uninstall-GreenroomInstance {
         $full = [IO.Path]::GetFullPath($stateDir)
         if ((Split-Path $full -Parent) -ne [IO.Path]::GetFullPath($root).TrimEnd('\') -or
             (Split-Path $full -Leaf) -ne $Name) {
-            Write-Error -Category InvalidArgument -Message ("'$Name' does not name its own directory under " +
+            Write-CommandError -Cmdlet $PSCmdlet -ErrorId 'StatePathOutsideRoot' -Category InvalidArgument -TargetObject $Name -Message ("'$Name' does not name its own directory under " +
                 "$root -- it resolves to $full. Nothing was removed.")
             return
         }
@@ -108,7 +108,8 @@ function Uninstall-GreenroomInstance {
 
         $taskExists = [bool](Get-ScheduledTask -TaskPath '\' -TaskName $task -ErrorAction Ignore)
         if (-not $taskExists -and -not (Test-Path -LiteralPath $stateDir)) {
-            Write-Error -Category ObjectNotFound -Message "'$Name' is not installed: no task '$task' and no state directory."
+            Write-CommandError -Cmdlet $PSCmdlet -ErrorId 'InstanceNotInstalled' -Category ObjectNotFound -TargetObject $Name `
+                -Message "'$Name' is not installed: no task '$task' and no state directory."
             return
         }
 
@@ -118,7 +119,7 @@ function Uninstall-GreenroomInstance {
         # kills its own ancestor part-way through, after the task is gone, leaving the state
         # half-removed.
         if (Test-SelfIsInstance -Name $Name) {
-            Write-Error -Category InvalidOperation -Message (
+            Write-CommandError -Cmdlet $PSCmdlet -ErrorId 'SessionIsSelf' -Category InvalidOperation -TargetObject $Name -Message (
                 "'$Name' is the session this shell is running inside. Uninstalling it from here would kill " +
                 'this process part-way through and leave it half-removed. Run it from a shell outside the session.')
             return
@@ -126,7 +127,7 @@ function Uninstall-GreenroomInstance {
         # An elevated instance's processes cannot be seen or stopped from an unelevated shell,
         # and its task cannot be unregistered -- the state would go while the watchdog lived on
         # and crash-looped for want of its config. It is removed by one elevated run instead.
-        if (-not (Assert-CanActOnInstance -Name $Name -Command 'Uninstall-GreenroomInstance' -NoElevate:$NoElevate -Defer $deferred)) {
+        if (-not (Assert-CanActOnInstance -Name $Name -Command 'Uninstall-GreenroomInstance' -NoElevate:$NoElevate -Defer $deferred -Cmdlet $PSCmdlet)) {
             return
         }
 
@@ -138,7 +139,7 @@ function Uninstall-GreenroomInstance {
         if ($taskExists) {
             $blocked = Get-TaskRewriteBlocker -Name $Name
             if ($blocked) {
-                Write-Error -Category PermissionDenied -Message (
+                Write-CommandError -Cmdlet $PSCmdlet -ErrorId 'TaskRemovalRefused' -Category PermissionDenied -TargetObject $Name -Message (
                     "refusing to uninstall '$Name' -- $blocked Nothing has been changed.")
                 return
             }

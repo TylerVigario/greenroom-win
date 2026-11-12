@@ -154,7 +154,7 @@ function Stop-GreenroomSession {
         # each nested call resolves its name all over again.
         foreach ($n in @(Resolve-InstanceName -Name $Name -Cmdlet $PSCmdlet)) {
             if (Test-SelfIsInstance -Name $n) {
-                Write-Error -Category InvalidOperation -Message (
+                Write-CommandError -Cmdlet $PSCmdlet -ErrorId 'SessionIsSelf' -Category InvalidOperation -TargetObject $n -Message (
                     "'$n' is the session this shell is running inside. Stopping it from here would kill " +
                     'this process part-way through, so the settle check would never run and this could not ' +
                     'report whether it stayed down. Run it from a shell outside the session.')
@@ -167,7 +167,7 @@ function Stop-GreenroomSession {
             # defaults over there, and -Confirm must prompt in the shell the operator typed in.
             if (-not $PSCmdlet.ShouldProcess($n, 'Stop-GreenroomSession')) { continue }
 
-            if (-not (Assert-CanActOnInstance -Name $n -Command 'Stop-GreenroomSession' -NoElevate:$NoElevate -Defer $deferred)) {
+            if (-not (Assert-CanActOnInstance -Name $n -Command 'Stop-GreenroomSession' -NoElevate:$NoElevate -Defer $deferred -Cmdlet $PSCmdlet)) {
                 continue
             }
 

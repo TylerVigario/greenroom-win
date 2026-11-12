@@ -56,7 +56,7 @@ function Resolve-InstanceName {
 
     if ($Name -and -not [System.Management.Automation.WildcardPattern]::ContainsWildcardCharacters($Name)) {
         if (Get-ScheduledTask -TaskPath '\' -TaskName "greenroom-$Name" -ErrorAction Ignore) { return $Name }
-        $Cmdlet.WriteError([System.Management.Automation.ErrorRecord]::new(
+        Write-CommandError -Cmdlet $Cmdlet -ErrorRecord ([System.Management.Automation.ErrorRecord]::new(
             [System.Management.Automation.ItemNotFoundException]::new(
                 "no scheduled task 'greenroom-$Name' -- is '$Name' installed?"),
             'InstanceNotRegistered', [System.Management.Automation.ErrorCategory]::ObjectNotFound, $Name))
@@ -71,7 +71,7 @@ function Resolve-InstanceName {
 
     if (-not $Name) {
         if ($registered.Count -eq 1) { return $registered[0] }
-        $Cmdlet.WriteError([System.Management.Automation.ErrorRecord]::new(
+        Write-CommandError -Cmdlet $Cmdlet -ErrorRecord ([System.Management.Automation.ErrorRecord]::new(
             [System.ArgumentException]::new(
                 "an instance name is required. Registered: $(if ($registered) { $registered -join ', ' } else { 'none' })"),
             'InstanceNameRequired', [System.Management.Automation.ErrorCategory]::InvalidArgument, $null))
