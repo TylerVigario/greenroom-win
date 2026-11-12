@@ -30,8 +30,9 @@ Describe 'Update-GreenroomInstance' {
         Mock -ModuleName Greenroom Get-MissingClaudeExe { $null }
         Mock -ModuleName Greenroom Restart-GreenroomSession { }
         # Mocked rather than left to run for real, or the whole suite would depend on
-        # whether the shell running it happens to be elevated.
-        Mock -ModuleName Greenroom Test-TaskRewritable { $null }
+        # whether the shell running it happens to be elevated, and on what it runs inside.
+        Mock -ModuleName Greenroom Get-TaskRewriteBlocker { $null }
+        Mock -ModuleName Greenroom Test-SelfIsInstance { $false }
         # alpha is behind, beta is current. $script:Loaded, not $script:GreenroomModuleVersion:
         # a mock body runs in THIS file's scope, where the module's variable is $null -- which
         # made beta read as Unversioned, and the test passed for the wrong reason.
@@ -135,7 +136,7 @@ Describe 'Update-GreenroomInstance' {
         # NON-terminating error, so the attempt carried on and the instance was reported
         # Updated while its task still named the old version.
         Mock -ModuleName Greenroom Get-InstanceAssetVersion { [version]'0.0.1' }
-        Mock -ModuleName Greenroom Test-TaskRewritable {
+        Mock -ModuleName Greenroom Get-TaskRewriteBlocker {
             if ($Name -eq 'alpha') { 'owned by BUILTIN\Administrators.' }
         }
         Update-GreenroomInstance -ErrorAction SilentlyContinue
@@ -147,7 +148,7 @@ Describe 'Update-GreenroomInstance' {
 
     It 'carries on to the next instance after refusing one' {
         Mock -ModuleName Greenroom Get-InstanceAssetVersion { [version]'0.0.1' }
-        Mock -ModuleName Greenroom Test-TaskRewritable {
+        Mock -ModuleName Greenroom Get-TaskRewriteBlocker {
             if ($Name -eq 'alpha') { 'owned by BUILTIN\Administrators.' }
         }
         Update-GreenroomInstance -ErrorAction SilentlyContinue -ErrorVariable e
@@ -158,12 +159,70 @@ Describe 'Update-GreenroomInstance' {
 
     It 'reports a refusal as Refused, not Updated or Failed' {
         Mock -ModuleName Greenroom Get-InstanceAssetVersion { [version]'0.0.1' }
-        Mock -ModuleName Greenroom Test-TaskRewritable {
+        Mock -ModuleName Greenroom Get-TaskRewriteBlocker {
             if ($Name -eq 'alpha') { 'requires an elevated caller.' }
         }
         $rows = Update-GreenroomInstance -ErrorAction SilentlyContinue
         ($rows | Where-Object Instance -eq 'alpha').Action | Should -Be 'Refused'
         ($rows | Where-Object Instance -eq 'beta').Action  | Should -Be 'Updated'
+    }
+
+    It 'asks the blocker about the elevation the re-registration will inherit' {
+        # The configured value: Install- inherits it, so it is what will be registered.
+        Mock -ModuleName Greenroom Test-InstanceElevated { $Name -eq 'alpha' }
+        Update-GreenroomInstance
+        Should -Invoke -ModuleName Greenroom Get-TaskRewriteBlocker -Times 1 -Exactly `
+            -ParameterFilter { $Name -eq 'alpha' -and $Elevated }
+    }
+
+    It 'carries on to the next instance when a RESTART fails, with no -ErrorAction supplied' {
+        # Restart-'s Write-Error is terminating under the module's ErrorActionPreference, so
+        # uncaught it ended the loop after the first instance's task had already moved.
+        Mock -ModuleName Greenroom Get-InstanceAssetVersion { [version]'0.0.1' }
+        Mock -ModuleName Greenroom Restart-GreenroomSession {
+            # -ErrorAction Stop, because a mock body runs in this file's scope and not the
+            # module's: the real Restart-'s Write-Error is terminating, measured, and a plain
+            # one here would not be -- letting the test pass with the fix taken out.
+            if ($Name -eq 'alpha') { Write-Error "'alpha' did not come up within 45 s." -ErrorAction Stop }
+        }
+        $rows = @(Update-GreenroomInstance 2>$null)
+        Should -Invoke -ModuleName Greenroom Install-GreenroomInstance -Times 1 -Exactly `
+            -ParameterFilter { $Name -eq 'beta' }
+        Should -Invoke -ModuleName Greenroom Restart-GreenroomSession -Times 1 -Exactly `
+            -ParameterFilter { $Name -eq 'beta' }
+        $rows.Count | Should -Be 2
+    }
+
+    It 'reports a failed restart as Registered, and says so' {
+        # The task names the new assets; the session is what did not follow.
+        Mock -ModuleName Greenroom Get-InstanceAssetVersion { [version]'0.0.1' }
+        Mock -ModuleName Greenroom Restart-GreenroomSession {
+            # -ErrorAction Stop, because a mock body runs in this file's scope and not the
+            # module's: the real Restart-'s Write-Error is terminating, measured, and a plain
+            # one here would not be -- letting the test pass with the fix taken out.
+            if ($Name -eq 'alpha') { Write-Error "'alpha' did not come up within 45 s." -ErrorAction Stop }
+        }
+        $rows = @(Update-GreenroomInstance -ErrorAction SilentlyContinue -ErrorVariable e)
+        ($rows | Where-Object Instance -eq 'alpha').Action | Should -Be 'Registered'
+        ($rows | Where-Object Instance -eq 'beta').Action  | Should -Be 'Updated'
+        "$e" | Should -Match ([regex]::Escape("'alpha' is re-registered on $script:Loaded, but restarting it failed"))
+        "$e" | Should -Match 'did not come up'
+    }
+
+    It 'does not restart the session this shell runs inside, and names the command that will' {
+        # Restart- refuses that one, so asking it would only produce an error for the case an
+        # admin lane updating its own host always hits.
+        Mock -ModuleName Greenroom Get-InstanceAssetVersion { [version]'0.0.1' }
+        Mock -ModuleName Greenroom Test-SelfIsInstance { $Name -eq 'alpha' }
+        $rows = @(Update-GreenroomInstance -WarningVariable w -WarningAction SilentlyContinue)
+        Should -Invoke -ModuleName Greenroom Install-GreenroomInstance -Times 1 -Exactly `
+            -ParameterFilter { $Name -eq 'alpha' }
+        Should -Invoke -ModuleName Greenroom Restart-GreenroomSession -Times 0 `
+            -ParameterFilter { $Name -eq 'alpha' }
+        Should -Invoke -ModuleName Greenroom Restart-GreenroomSession -Times 1 -Exactly `
+            -ParameterFilter { $Name -eq 'beta' }
+        ($rows | Where-Object Instance -eq 'alpha').Action | Should -Be 'Registered'
+        "$w" | Should -Match ([regex]::Escape('Restart-GreenroomSession alpha'))
     }
 }
 
@@ -188,6 +247,10 @@ Describe 'Update-GreenroomInstance results' {
         Mock -ModuleName Greenroom Get-InstanceAssetVersion {
             if ($Name -eq 'alpha') { [version]'0.0.1' } else { $script:Loaded }
         }
+        # Pinned in every block, not just the first: left real, these read the host --
+        # whether the shell is elevated, what it runs inside, who owns a task by that name.
+        Mock -ModuleName Greenroom Get-TaskRewriteBlocker { $null }
+        Mock -ModuleName Greenroom Test-SelfIsInstance { $false }
     }
 
     It 'reports the moved instance as Updated, and the current one as Current' {
@@ -259,6 +322,8 @@ Describe 'Update-GreenroomInstance, when the recorded claude.exe is gone' {
         Mock -ModuleName Greenroom Get-MissingClaudeExe {
             if ($Name -eq 'beta') { [PSCustomObject]@{ Path = 'C:\gone\claude.exe'; Explicit = $false } }
         }
+        Mock -ModuleName Greenroom Get-TaskRewriteBlocker { $null }
+        Mock -ModuleName Greenroom Test-SelfIsInstance { $false }
     }
 
     It 'reports ClaudeMissing, not Current, and says how to fix it' {

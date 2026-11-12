@@ -128,14 +128,15 @@ function Install-GreenroomInstance {
                  -TriggerDelay $TriggerDelay -AdditionalDirectories $AdditionalDirectories `
                  -Elevated $Elevated.IsPresent -Model $Model
 
-        # MEASURED: registering RunLevel Highest from a non-elevated shell fails with
-        # 'Access is denied'. Checked here rather than at registration, which is the last
-        # step -- failing there leaves files written, trust seeded and no task to run any
-        # of it.
-        if ($s.Elevated -and -not (Test-SelfElevated)) {
-            throw ("-Elevated requires an elevated caller. Registering a scheduled task with RunLevel " +
-                   'Highest fails with Access Denied otherwise, verified on the reference host. ' +
-                   'Nothing has been changed.')
+        # Every refusal this shell can predict, made here rather than at registration, which
+        # is the last step. Failing there leaves config.json rewritten, the grant and the
+        # trust seed applied, and the task as it was -- a config and a task that no longer
+        # agree, or files written and no task to run any of them. MEASURED: registering
+        # RunLevel Highest from a non-elevated shell fails with 'Access is denied', and so
+        # does rewriting a task owned by Administrators.
+        $blocked = Get-TaskRewriteBlocker -Name $s.Instance -Elevated $s.Elevated
+        if ($blocked) {
+            throw "refusing to install '$($s.Instance)' -- $blocked Nothing has been changed."
         }
 
         # Both read BEFORE anything is rewritten, because both are facts about the state

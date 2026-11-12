@@ -250,6 +250,66 @@ Describe 'Uninstall-GreenroomInstance guards' {
     }
 }
 
+Describe 'Uninstall-GreenroomInstance, a task this shell cannot remove' {
+    <#
+      An UNELEVATED instance whose task is owned by Administrators -- created from an
+      elevated shell, which is how three of five instances on the reference host are.
+      Unregister-ScheduledTask reports Access is denied there as a NON-terminating error,
+      measured 2026-11-12, so carrying on killed the session and deleted the state while the
+      task survived to start a watchdog with no config at the next logon.
+    #>
+    BeforeEach {
+        $script:Probe = Join-Path $script:StateRoot 'probe'
+        New-Item -ItemType Directory -Path $script:Probe -Force | Out-Null
+        Set-Content (Join-Path $script:Probe 'config.json') '{ "workingDirectory": "C:\\probe-wd" }'
+
+        Mock -ModuleName Greenroom Get-GreenroomStateRoot { $script:StateRoot }
+        Mock -ModuleName Greenroom Get-ScheduledTask { [PSCustomObject]@{ TaskName = 'greenroom-probe' } }
+        Mock -ModuleName Greenroom Stop-ScheduledTask { }
+        Mock -ModuleName Greenroom Unregister-ScheduledTask { }
+        Mock -ModuleName Greenroom Stop-VerifiedProcess { 1 }
+        Mock -ModuleName Greenroom Test-SelfIsInstance { $false }
+        Mock -ModuleName Greenroom Test-SelfElevated { $false }
+        Mock -ModuleName Greenroom Test-InstanceElevated { $false }
+        Mock -ModuleName Greenroom Get-TaskRewriteBlocker { $null }
+    }
+
+    AfterEach {
+        Get-ChildItem $script:StateRoot -Directory -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'refuses it before stopping anything, and says why' {
+        Mock -ModuleName Greenroom Get-TaskRewriteBlocker { 'owned by BUILTIN\Administrators. Run this from an elevated shell.' }
+        Uninstall-GreenroomInstance -Name probe -Confirm:$false -ErrorVariable err -ErrorAction SilentlyContinue | Out-Null
+        "$err" | Should -Match ([regex]::Escape("refusing to uninstall 'probe'"))
+        "$err" | Should -Match 'Nothing has been changed'
+        Should -Invoke -ModuleName Greenroom Unregister-ScheduledTask -Times 0
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 0
+        Test-Path $script:Probe | Should -BeTrue
+    }
+
+    It 'stops before the kills when the unregister is refused for a reason nobody predicted' {
+        # The backstop. The stand-in fails as the real cmdlet does: non-terminating, unless
+        # the call says -ErrorAction -- so this fails if the source's -ErrorAction Stop goes.
+        Mock -ModuleName Greenroom Unregister-ScheduledTask {
+            $ea = if ($PesterBoundParameters.ContainsKey('ErrorAction')) { $PesterBoundParameters['ErrorAction'] } else { 'Continue' }
+            Write-Error -Message 'Access is denied.' -ErrorAction $ea
+        }
+        { Uninstall-GreenroomInstance -Name probe -Confirm:$false } | Should -Throw '*Access is denied*'
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 0
+        Test-Path $script:Probe | Should -BeTrue
+    }
+
+    It 'does not ask about a task that is already gone' {
+        # Nothing to remove, so nothing to refuse: the half-removed case still cleans up.
+        Mock -ModuleName Greenroom Get-ScheduledTask { $null }
+        Mock -ModuleName Greenroom Get-TaskRewriteBlocker { 'owned by BUILTIN\Administrators.' }
+        $r = Uninstall-GreenroomInstance -Name probe -Confirm:$false
+        $r.StateRemoved | Should -BeTrue
+        Should -Invoke -ModuleName Greenroom Get-TaskRewriteBlocker -Times 0
+    }
+}
+
 Describe 'The elevated uninstall command, run for real' {
     # As for Stop-: the string Invoke-ElevatedSelf builds runs in a real child pwsh (without
     # RunAs) against a stand-in module, which records what it was called with.

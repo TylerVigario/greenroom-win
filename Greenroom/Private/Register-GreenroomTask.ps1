@@ -83,10 +83,11 @@ function Register-GreenroomTask {
     }
     $arguments = [string]$registered.Actions[0].Arguments
     if (-not $arguments.Contains($vbs)) {
-        throw ("task '$task' still names different assets after re-registration: " +
-               "expected '$vbs', found '$arguments'. The most likely cause is that the " +
-               'task is owned by an account this shell cannot write as -- run from an ' +
-               'elevated shell.')
+        # Not the Access-denied case: -ErrorAction Stop has already raised that one. So this
+        # names no cause it cannot see, and says where to look instead.
+        throw ("task '$task' still names different assets after a registration that reported " +
+               "no error: expected '$vbs', found '$arguments'. Read it back with " +
+               "Get-ScheduledTask -TaskName $task to see what it holds.")
     }
 
     Write-Verbose "task registered: $task (delay $TriggerDelay, RunLevel $(if ($Elevated) { 'Highest' } else { 'Limited' }))"

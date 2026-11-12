@@ -33,7 +33,9 @@
   different operations, and conflating them is what made that flag necessary.
 
   Order matters. The task is unregistered first, so its trigger cannot start a
-  replacement watchdog while the rest of this runs.
+  replacement watchdog while the rest of this runs. And before that, a task this shell
+  cannot remove -- one owned by Administrators, from an unelevated shell -- is refused
+  with nothing touched, because the unregister would fail without stopping anything.
 
   Kills are identity-re-verified immediately before each one, which the script did not
   do: it enumerated, then killed. A pid recorded moments earlier can already belong to
@@ -128,11 +130,29 @@ function Uninstall-GreenroomInstance {
             return
         }
 
+        # Refused BEFORE anything is stopped. Unregister-ScheduledTask reports Access is
+        # denied as a NON-TERMINATING error -- measured 2026-11-12 from a medium-integrity
+        # process against a task an elevated shell had created -- so against a task this
+        # shell cannot remove, carrying on would kill the session and delete its state while
+        # the task survived, to start a watchdog with no config at the next logon.
+        if ($taskExists) {
+            $blocked = Get-TaskRewriteBlocker -Name $Name
+            if ($blocked) {
+                Write-Error -Category PermissionDenied -Message (
+                    "refusing to uninstall '$Name' -- $blocked Nothing has been changed.")
+                return
+            }
+        }
+
         # The task first. Its trigger would otherwise be free to start a replacement
         # watchdog while the kills below are still running.
+        #
+        # -ErrorAction Stop is load-bearing, as the backstop for any cause the check above
+        # cannot predict: without it a refused unregister carries on into the kills. With it,
+        # reaching the result means the task really went, so TaskRemoved is a fact.
         if ($taskExists) {
             Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
-            Unregister-ScheduledTask -TaskName $task -Confirm:$false
+            Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction Stop
             Write-Verbose "task removed: $task"
         }
         else {
