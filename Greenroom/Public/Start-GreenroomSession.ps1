@@ -118,7 +118,7 @@ function Start-GreenroomSession {
                 continue
             }
 
-            Write-Error -Category OperationTimeout -Message (
+            Write-CommandError -Cmdlet $PSCmdlet -ErrorId 'SessionDidNotStart' -Category OperationTimeout -TargetObject $n -Message (
                 "'$n' did not come up within $TimeoutSeconds s. If its watchdog is still alive -- in crash-loop " +
                 "backoff, say -- the new one exits on the instance's mutex and nothing starts until the backoff " +
                 "ends; Restart-GreenroomSession $n stops it first. Check: Get-Content " +

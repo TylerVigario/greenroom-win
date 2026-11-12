@@ -259,7 +259,9 @@ function Install-GreenroomInstance {
         }
 
         if (-not $up) {
-            Write-Error -Category OperationTimeout -Message (
+            # Write-CommandError so a pipeline of installs carries on past this one, unless
+            # the caller asked it to stop. See its notes.
+            Write-CommandError -Cmdlet $PSCmdlet -ErrorId 'SessionDidNotStart' -Category OperationTimeout -TargetObject $s.Instance -Message (
                 "'$($s.Instance)' did not come up within $TimeoutSeconds s. Check: Get-Content " +
                 "`"$(Join-Path $s.StateDir 'watchdog.log')`" -Tail 20")
             return

@@ -85,8 +85,11 @@ function Restart-GreenroomSession {
         # Instances are staggered at logon so they do not race each other starting, and
         # restarting them all at once would bring that race straight back.
         foreach ($n in @(Resolve-InstanceName -Name $Name -Cmdlet $PSCmdlet)) {
+            # Write-CommandError, not Write-Error: under the module's Stop preference a bare
+            # Write-Error is terminating, so the `continue` below would never run and
+            # `Restart-GreenroomSession *` from inside a lane would stop at that lane.
             if (Test-SelfIsInstance -Name $n) {
-                Write-Error -Category InvalidOperation -Message (
+                Write-CommandError -Cmdlet $PSCmdlet -ErrorId 'SessionIsSelf' -Category InvalidOperation -TargetObject $n -Message (
                     "'$n' is the session this shell is running inside. Restarting it from here would kill " +
                     'this process partway through, before the task is started again, leaving the instance down ' +
                     "rather than restarted. Run it from a shell outside the session.")
@@ -99,7 +102,7 @@ function Restart-GreenroomSession {
             # shell the operator typed in.
             if (-not $PSCmdlet.ShouldProcess($n, 'Restart-GreenroomSession')) { continue }
 
-            if (-not (Assert-CanActOnInstance -Name $n -Command 'Restart-GreenroomSession' -NoElevate:$NoElevate -Defer $deferred)) {
+            if (-not (Assert-CanActOnInstance -Name $n -Command 'Restart-GreenroomSession' -NoElevate:$NoElevate -Defer $deferred -Cmdlet $PSCmdlet)) {
                 continue
             }
 
@@ -145,7 +148,7 @@ function Restart-GreenroomSession {
                 continue
             }
 
-            Write-Error -Category OperationTimeout -Message (
+            Write-CommandError -Cmdlet $PSCmdlet -ErrorId 'SessionDidNotStart' -Category OperationTimeout -TargetObject $n -Message (
                 "'$n' did not come up within $TimeoutSeconds s. Check: Get-Content " +
                 "`"$(Join-Path (Get-GreenroomStateRoot) "$n\watchdog.log")`" -Tail 20")
         }

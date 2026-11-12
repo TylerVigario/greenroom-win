@@ -55,7 +55,7 @@ function Show-GreenroomSession {
         # that it would show a window for an instance that is not even running.
         # Elevation first: an elevated session cannot be found from an unelevated shell.
         if (Invoke-ElevationFirst -Name $Name -Command 'Show-GreenroomSession' -NoElevate:$NoElevate -Cmdlet $PSCmdlet) { return }
-        $target = Resolve-GreenroomTarget -Name $Name -RequireWindow
+        $target = Resolve-GreenroomTarget -Name $Name -RequireWindow -Cmdlet $PSCmdlet
         if (-not $target) { return }
 
         # ASK BEFORE ESCALATING. Escalation runs this command again in a NEW process,
@@ -66,7 +66,7 @@ function Show-GreenroomSession {
         # elevated window they may never look at.
         if (-not $PSCmdlet.ShouldProcess($target.Instance, 'Show-GreenroomSession')) { return }
 
-        if (-not (Assert-CanActOnInstance -Name $target.Instance -Command 'Show-GreenroomSession' -NoElevate:$NoElevate)) {
+        if (-not (Assert-CanActOnInstance -Name $target.Instance -Command 'Show-GreenroomSession' -NoElevate:$NoElevate -Cmdlet $PSCmdlet)) {
             return
         }
 
@@ -77,6 +77,7 @@ function Show-GreenroomSession {
             return
         }
 
-        Write-Error -Category InvalidResult -Message (Get-WindowFailureReason -Name $target.Instance)
+        Write-CommandError -Cmdlet $PSCmdlet -ErrorId 'WindowOperationFailed' -Category InvalidResult `
+            -TargetObject $target.Instance -Message (Get-WindowFailureReason -Name $target.Instance)
     }
 }
