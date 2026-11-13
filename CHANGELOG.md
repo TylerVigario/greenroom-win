@@ -10,6 +10,16 @@ verbatim. 0.1.0 at the bottom is hand-written and reads "Initial release." becau
 release has no changes to list — there is nothing it changed from.
 
 - - -
+## [v0.8.0](https://github.com/TylerVigario/greenroom-win/compare/v0.7.3..v0.8.0) - 2026-11-13
+#### Features
+- (**update**) one UAC prompt updates the tasks this shell cannot register (#112) - ([be4ee62](https://github.com/TylerVigario/greenroom-win/commit/be4ee62dd1939c6a9fa33c80334dca5f5a1498b1)) - Tyler Vigario, Claude Opus 5.5
+#### Bug Fixes
+- (**update**) refuse what the shell cannot register, instead of reporting it updated (#109) - ([e49570c](https://github.com/TylerVigario/greenroom-win/commit/e49570c53498e4f27520a2e1c835f5e270920c9f)) - Tyler Vigario, Claude Opus 5
+- one instance's error no longer ends a command, unless the caller asks it to (#111) - ([c19bb50](https://github.com/TylerVigario/greenroom-win/commit/c19bb50f0a8fbc4e7c5617d825a7291568c89d9d)) - Tyler Vigario, Claude Opus 5.5
+- refuse before acting in install and uninstall, and survive a failed restart (#110) - ([614d008](https://github.com/TylerVigario/greenroom-win/commit/614d00875c6fa299f707bcfbee241633269e441c)) - Tyler Vigario, Claude Opus 5.5
+
+- - -
+
 ## [v0.7.3](https://github.com/TylerVigario/greenroom-win/compare/v0.7.2..v0.7.3) - 2026-11-11
 #### Bug Fixes
 - (**elevation**) say when a change has not reached the running session (#105) - ([5d2eb4a](https://github.com/TylerVigario/greenroom-win/commit/5d2eb4af2dc2260b712a705ad7bf522c994d56f5)) - Tyler Vigario, Claude Opus 5
