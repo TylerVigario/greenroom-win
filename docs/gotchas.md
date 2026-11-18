@@ -354,6 +354,51 @@ instance has no reason to read — but the remedy is per-tool, not a cure for th
 
 ---
 
+## 7. A folder passed with `--add-dir` stops the session at a trust prompt
+
+From Claude Code 2.1.326, `--add-dir` in a terminal session shows a trust prompt for each
+folder not trusted yet ("Changed `--add-dir` and `/add-dir` in local terminal sessions to
+show the trust prompt for a folder you have not trusted yet"). In a hidden window the
+session simply stops there:
+
+```
+Adding a new directory:
+
+C:\Users\<you>\Pictures\Screenshots
+
+This session hasn't worked here before. Is this a directory you created or one you trust?
+...
+❯ No, exit
+  Yes, add it
+```
+
+`No, exit` is the default. Two things make answering it no fix:
+
+- **The answer lasts one session.** The prompt says so: "Your answer holds for this
+  session." Every relaunch, whether a reboot, an update cycle or a crash, asks again.
+  Only starting Claude Code *in* that folder and trusting it there is remembered.
+- **Trusting a folder trusts its whole repository.** For a folder inside a git
+  repository the prompt adds "Trusting it trusts that whole repository, including its other
+  worktrees and subdirectories", so that repository's skills, commands, agents and git
+  settings, hooks included, can run in the session. Granting a share that holds another
+  machine's repository would trust all of it.
+
+**The symptom: an instance with grants never writes its session record.** It has a
+`ClaudePid` and a window, but no `~/.claude/sessions/<pid>.json`, and its Remote Control
+entry never appears. Instances without grants start normally, and so does one whose
+grant is a folder already trusted.
+
+**greenroom therefore passes no `--add-dir`.** The installer already writes every grant
+into the instance's own `.claude/settings.json` as `permissions.additionalDirectories`,
+and that entry grants the same read, edit and execute access with no prompt. Measured on
+2.1.327 against the same folder: `--add-dir` stopped at the prompt, and the settings
+entry started straight to the input box, and a session given the grant that way listed the
+folder's files. The one difference, by the 2.1.325 changelog rather than measured here, is
+git: read-only git commands in a granted folder ask first, because only `--add-dir`
+trusts that folder's repository.
+
+---
+
 ## Two smaller ones
 
 **Identify sessions by the instance name on the command line.** The name passed to

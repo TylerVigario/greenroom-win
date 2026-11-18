@@ -131,9 +131,13 @@ if ($cfg.model) {
 
 # Directory grants are PER INSTANCE and default to none. An instance launches with
 # access to its working directory and nothing else unless the install granted more.
+# The grants reach claude through the project's own .claude/settings.json
+# (permissions.additionalDirectories, written by Set-ProjectGrant at install), not
+# --add-dir: from Claude Code 2.1.326 every --add-dir folder not yet trusted stops the
+# session at an "Adding a new directory" prompt, answered for that session only, in a
+# window nobody can see. The settings entry grants the same access with no prompt.
 if ($cfg.additionalDirectories -and @($cfg.additionalDirectories).Count -gt 0) {
-    $claudeArgs += '--add-dir'
-    $claudeArgs += @($cfg.additionalDirectories)
+    Log "grants (from .claude/settings.json): $(@($cfg.additionalDirectories) -join '; ')"
 }
 
 # Continue the previous conversation rather than minting a new session id on every
