@@ -174,7 +174,7 @@ Task Scheduler  (at logon, +delay, Interactive, non-elevated by default)
               └── wt.exe -w new --title <token>  (hidden)   ← names the new window
                     └── <shell> greenroom-launch.ps1 -Instance <name>
                           └── claude.exe --remote-control <name> --name <name>
-                                         [--add-dir ...] --resume <id>
+                                         --resume <id>
 ```
 
 `<shell>` is pwsh 7 where it is installed, otherwise the in-box Windows PowerShell 5.1

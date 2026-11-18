@@ -34,8 +34,10 @@
   connect from one.
 
 .PARAMETER AdditionalDirectories
-  Directory grants for THIS instance, passed as --add-dir. Default none: an instance
-  boots with its working directory and nothing else.
+  Directory grants for THIS instance, written to its project's .claude/settings.json as
+  permissions.additionalDirectories. Default none: an instance boots with its working
+  directory and nothing else. They are not passed as --add-dir, which from Claude Code
+  2.1.326 stops a hidden session at a trust prompt (docs/gotchas.md, section 7).
 
 .PARAMETER Elevated
   Run the session with a full admin token (task RunLevel Highest). Off by default

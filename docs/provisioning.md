@@ -402,8 +402,11 @@ directory, its own grants, and its own name in the Remote Control UI.
 ## Directory access
 
 Each instance launches with access to its working directory and nothing else.
-Anything more is granted at install time and passed as `--add-dir` on the launch
-line, so the grant is scoped to that instance and visible in the process list:
+Anything more is granted at install time and written to that instance's own project
+settings, `<working directory>\.claude\settings.json`, as
+`permissions.additionalDirectories`, so the grant is scoped to that instance. Each
+launch names the grants in `launch.log`. They are not passed as `--add-dir`: from Claude
+Code 2.1.326 that stops a hidden session at a trust prompt (`gotchas.md`, section 7).
 
 ```powershell
 Install-GreenroomInstance -Name desktop-admin -AdditionalDirectories "$env:USERPROFILE"
